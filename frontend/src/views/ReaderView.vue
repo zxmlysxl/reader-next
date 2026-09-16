@@ -1176,6 +1176,7 @@ const showControls = ref(false)
 const isMobile = ref(false)
 const viewportWidth = ref(typeof window === 'undefined' ? 0 : window.innerWidth)
 let speechTimerTicker: number | null = null
+let wakeLock: WakeLockSentinel | null = null
 let suppressNextTapUntil = 0
 let restorePositionTimer: number | null = null
 let persistPositionTimer: number | null = null
@@ -1799,7 +1800,23 @@ async function goHome() {
   router.replace('/')
 }
 
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator) || wakeLock) return
+  try {
+    wakeLock = await (navigator as any).wakeLock.request('screen')
+  } catch {
+    wakeLock = null
+  }
+}
+
+function releaseWakeLock() {
+  if (!wakeLock) return
+  wakeLock.release()
+  wakeLock = null
+}
+
 function handlePageHide() {
+  releaseWakeLock()
   persistReadingProgressKeepalive()
 }
 
@@ -2831,7 +2848,7 @@ onMounted(async () => {
     window.addEventListener('pagehide', handlePageHide)
     window.addEventListener('beforeunload', handleBeforeUnload)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    store.fetchVoices()
+    await acquireWakeLock()
   applySystemTheme(store.isNight ? 'dark' : appStore.theme, store.currentTheme.body)
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     window.speechSynthesis.onvoiceschanged = () => store.fetchVoices()
@@ -2866,6 +2883,7 @@ onUnmounted(() => {
     window.removeEventListener('pagehide', handlePageHide)
     window.removeEventListener('beforeunload', handleBeforeUnload)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
+    releaseWakeLock()
   if (speechTimerTicker) clearInterval(speechTimerTicker)
   if (restorePositionTimer) clearTimeout(restorePositionTimer)
   if (persistPositionTimer) clearTimeout(persistPositionTimer)
