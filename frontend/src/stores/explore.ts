@@ -10,24 +10,13 @@ import {
 } from '../utils/exploreCategories'
 
 const GLOBAL_EXPLORE_SOURCE_URL = '__global_explore__'
-const GLOBAL_EXPLORE_CATEGORIES: ExploreCategory[] = [
-  { title: '综合', url: 'mixed' },
-  { title: '排行', url: 'rank' },
-  { title: '新书', url: 'new' },
-  { title: '完本', url: 'finished' },
-  { title: '玄幻', url: 'fantasy' },
-  { title: '都市', url: 'urban' },
-  { title: '历史', url: 'history' },
-  { title: '科幻', url: 'sci-fi' },
-  { title: '悬疑', url: 'suspense' },
-]
+const EXPLORE_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
 export const useExploreStore = defineStore('explore', () => {
   const sourceStore = useSourceStore()
 
   const activeSourceUrl = ref<string>('')
   const activeCategoryUrl = ref<string>('')
-  
   const books = ref<SearchBook[]>([])
   const loading = ref(false)
   const page = ref(1)
@@ -37,12 +26,27 @@ export const useExploreStore = defineStore('explore', () => {
   const categories = ref<ExploreCategory[]>([])
   let categoryLoadId = 0
 
-  // 筛选出启用了 explore 的书源
+  // In-memory explore cache: keyed by sourceUrl + categoryUrl
+  const exploreCache = new Map<string, { books: SearchBook[]; nextCursor: number; hasMore: boolean; ts: number }>()
+
+  function cacheKey(sourceUrl: string, categoryUrl: string) {
+    return `${sourceUrl}::${categoryUrl}`
+  }
+
+  function getCached(sourceUrl: string, categoryUrl: string) {
+    const entry = exploreCache.get(cacheKey(sourceUrl, categoryUrl))
+    if (entry && Date.now() - entry.ts < EXPLORE_CACHE_TTL) return entry
+    return null
+  }
+
+  function setCached(sourceUrl: string, categoryUrl: string, data: { books: SearchBook[]; nextCursor: number; hasMore: boolean }) {
+    exploreCache.set(cacheKey(sourceUrl, categoryUrl), { ...data, ts: Date.now() })
+  }
+
   const exploreSources = computed(() => {
     return sourceStore.sources.filter((s: BookSource) => s.enabledExplore && s.exploreUrl)
   })
 
-  // 当前选中的书源对象
   const currentSource = computed(() => {
     return sourceStore.sources.find((s: BookSource) => s.bookSourceUrl === activeSourceUrl.value)
   })
@@ -85,7 +89,17 @@ export const useExploreStore = defineStore('explore', () => {
 
   async function setGlobalSource() {
     activeSourceUrl.value = GLOBAL_EXPLORE_SOURCE_URL
-    categories.value = GLOBAL_EXPLORE_CATEGORIES
+    categories.value = [
+      { title: '综合', url: 'mixed' },
+      { title: '排行', url: 'rank' },
+      { title: '新书', url: 'new' },
+      { title: '完本', url: 'finished' },
+      { title: '玄幻', url: 'fantasy' },
+      { title: '都市', url: 'urban' },
+      { title: '历史', url: 'history' },
+      { title: '科幻', url: 'sci-fi' },
+      { title: '悬疑', url: 'suspense' },
+    ]
     if (!categories.value.some((category) => category.url === activeCategoryUrl.value)) {
       await setCategory(categories.value[0].url)
     }
@@ -160,6 +174,19 @@ export const useExploreStore = defineStore('explore', () => {
     globalCursor.value = 0
     hasMore.value = true
     error.value = null
+
+    // Try cache first for single-source mode
+    if (!isGlobalMode.value) {
+      const cached = getCached(activeSourceUrl.value, activeCategoryUrl.value)
+      if (cached) {
+        books.value = cached.books
+        page.value++
+        globalCursor.value = cached.nextCursor
+        hasMore.value = cached.hasMore
+        return
+      }
+    }
+
     await fetchMore()
   }
 
@@ -174,8 +201,8 @@ export const useExploreStore = defineStore('explore', () => {
           category: activeCategoryUrl.value,
           cursor: globalCursor.value,
           limit: 20,
-          scanLimit: 96,
-          concurrentCount: 16,
+          scanLimit: 48,
+          concurrentCount: 8,
         })
         if (result.books.length > 0) {
           books.value.push(...result.books)
@@ -185,6 +212,20 @@ export const useExploreStore = defineStore('explore', () => {
         return
       }
 
+      // Single-source: use cache for first page
+      const isFirstPage = page.value === 1
+      if (isFirstPage) {
+        const cached = getCached(activeSourceUrl.value, activeCategoryUrl.value)
+        if (cached) {
+          books.value = cached.books
+          page.value++
+          globalCursor.value = cached.nextCursor
+          hasMore.value = cached.hasMore
+          loading.value = false
+          return
+        }
+      }
+
       const result = await exploreBook({
         bookSourceUrl: activeSourceUrl.value,
         ruleFindUrl: activeCategoryUrl.value,
@@ -192,9 +233,25 @@ export const useExploreStore = defineStore('explore', () => {
       })
 
       if (result && result.length > 0) {
-        books.value.push(...result)
+        if (isFirstPage) {
+          books.value = result
+          setCached(activeSourceUrl.value, activeCategoryUrl.value, {
+            books: result,
+            nextCursor: globalCursor.value,
+            hasMore: true,
+          })
+        } else {
+          books.value.push(...result)
+        }
         page.value++
       } else {
+        if (isFirstPage) {
+          setCached(activeSourceUrl.value, activeCategoryUrl.value, {
+            books: [],
+            nextCursor: 0,
+            hasMore: false,
+          })
+        }
         hasMore.value = false
       }
     } catch (err: any) {
@@ -205,7 +262,6 @@ export const useExploreStore = defineStore('explore', () => {
     }
   }
 
-  // 初始化时加载书源数据
   async function init() {
     if (sourceStore.sources.length === 0) {
       await sourceStore.fetchSources()

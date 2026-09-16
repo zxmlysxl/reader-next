@@ -1472,7 +1472,7 @@ export const useReaderStore = defineStore('reader', () => {
 
   async function preloadAroundChapter(index: number) {
     if (!book.value || !config.enablePreload) return
-    const targets = [index + 1, index + 2, index - 1]
+    const targets = [index + 1, index + 2, index - 1, index - 2]
       .filter((target, pos, list) => target >= 0 && target < chapters.value.length && list.indexOf(target) === pos)
     for (const target of targets) {
       await preloadNextChapter(target)
@@ -1482,8 +1482,8 @@ export const useReaderStore = defineStore('reader', () => {
   async function preloadNextChapter(index: number) {
     if (!book.value || !config.enablePreload || index >= chapters.value.length || preloadedContent.value.has(index)) return
     
-    // Keep max 3 preloaded chapters
-    if (preloadedContent.value.size > 3) {
+    // Keep max 5 preloaded chapters (current ±2)
+    if (preloadedContent.value.size > 5) {
       const firstKey = preloadedContent.value.keys().next().value
       if (firstKey !== undefined) preloadedContent.value.delete(firstKey)
     }
