@@ -28,11 +28,17 @@ use serde_json::Value;
 use std::convert::Infallible;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tokio::time::{timeout, Duration};
 use tokio_stream::wrappers::ReceiverStream;
 
 const DEFAULT_AVAILABLE_RESULT_LIMIT: usize = 20;
 const MAX_AVAILABLE_RESULT_LIMIT: usize = 100;
 const DEFAULT_AVAILABLE_CONCURRENT_COUNT: usize = 8;
+
+/// Per-source search timeout to prevent slow/blocked sources from stalling the whole batch.
+const SEARCH_SOURCE_TIMEOUT_SECS: u64 = 10;
+/// Default concurrent search count (lowered from 24 to reduce network pressure).
+const DEFAULT_SEARCH_CONCURRENT_COUNT: usize = 10;
 const MAX_AVAILABLE_CONCURRENT_COUNT: usize = 20;
 const AVAILABLE_SOURCE_SSE_RESULT_LIMIT: usize = 5;
 const DEFAULT_GLOBAL_EXPLORE_LIMIT: usize = 20;
@@ -2316,7 +2322,7 @@ pub async fn search_book_multi_sse(
     let key = q.key.unwrap_or_default();
     let last_index = q.last_index.unwrap_or(-1);
     let search_size = q.search_size.unwrap_or(50).max(1) as usize;
-    let concurrent = q.concurrent_count.unwrap_or(24).max(1) as usize;
+    let concurrent = q.concurrent_count.unwrap_or(DEFAULT_SEARCH_CONCURRENT_COUNT).max(1) as usize;
     let book_source_url =
         q.book_source_url
             .clone()
@@ -2407,9 +2413,25 @@ pub async fn search_book_multi_sse(
                 let k = key.clone();
                 let cur_idx = idx;
                 let user_ns_value = user_ns.clone();
+                let source_name = source.book_source_name.clone();
                 tasks.push(tokio::spawn(async move {
-                    let res = svc.search_book(&user_ns_value, &source, &k, 1).await;
-                    (cur_idx, source.book_source_name, res)
+                    let res = timeout(
+                        Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
+                        svc.search_book(&user_ns_value, &source, &k, 1),
+                    )
+                    .await;
+                    match res {
+                        Ok(Ok(list)) => (cur_idx, source_name, Ok(list)),
+                        Ok(Err(e)) => {
+                            tracing::warn!("search source {} error: {:?}", source_name, e);
+                            (cur_idx, source_name, Err(e.to_string()))
+                        }
+                        Err(_) => {
+                            // Timeout — treat as successful empty result so we don't block other sources
+                            tracing::debug!("search source {} timed out after {}s", source_name, SEARCH_SOURCE_TIMEOUT_SECS);
+                            (cur_idx, source_name, Ok(Vec::new()))
+                        }
+                    }
                 }));
                 idx += 1;
                 continue;
