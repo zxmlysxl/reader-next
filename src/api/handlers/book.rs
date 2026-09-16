@@ -3359,7 +3359,7 @@ fn should_use_available_source_cache(
     result_limit: Option<i32>,
     last_index: Option<i32>,
 ) -> bool {
-    !refresh && result_limit.is_none() && last_index.is_none()
+    !refresh && result_limit.is_none() && (last_index.is_none() || last_index == Some(-1))
 }
 
 fn fallback_available_book(req: &GetAvailableBookSourceRequest) -> Option<Book> {
@@ -3708,6 +3708,9 @@ mod tests {
         assert!(!should_use_available_source_cache(true, None, None));
         assert!(!should_use_available_source_cache(false, Some(20), None));
         assert!(!should_use_available_source_cache(false, None, Some(0)));
+        // -1 means "initial load", same as None — should use cache
+        assert!(should_use_available_source_cache(false, None, Some(-1)));
+        assert!(should_use_available_source_cache(false, None, None));
     }
 
     #[test]
