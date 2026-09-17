@@ -213,10 +213,8 @@ function startSearch() {
 function mergeCandidates(candidates: SearchBook[]) {
   if (!store.book || !candidates.length) return
   const currentBook = store.book
-  const currentAuthor = normalizeAuthorText(currentBook.author)
   candidates.forEach((item) => {
     if (item.origin === currentBook.origin) return
-    if (currentAuthor && item.author && normalizeAuthorText(item.author) !== currentAuthor) return
     const existed = results.value.some((candidate) =>
       candidate.origin === item.origin || (candidate.bookUrl === item.bookUrl && candidate.origin === item.origin),
     )
