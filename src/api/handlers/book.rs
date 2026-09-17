@@ -43,10 +43,10 @@ const MAX_AVAILABLE_CONCURRENT_COUNT: usize = 20;
 const AVAILABLE_SOURCE_SSE_RESULT_LIMIT: usize = 5;
 const DEFAULT_GLOBAL_EXPLORE_LIMIT: usize = 20;
 const MAX_GLOBAL_EXPLORE_LIMIT: usize = 100;
-const DEFAULT_GLOBAL_EXPLORE_CONCURRENT: usize = 16;
-const MAX_GLOBAL_EXPLORE_CONCURRENT: usize = 24;
-const DEFAULT_GLOBAL_EXPLORE_SCAN_LIMIT: usize = 96;
-const MAX_GLOBAL_EXPLORE_SCAN_LIMIT: usize = 120;
+const DEFAULT_GLOBAL_EXPLORE_CONCURRENT: usize = 8;
+const MAX_GLOBAL_EXPLORE_CONCURRENT: usize = 16;
+const DEFAULT_GLOBAL_EXPLORE_SCAN_LIMIT: usize = 48;
+const MAX_GLOBAL_EXPLORE_SCAN_LIMIT: usize = 64;
 
 #[derive(Debug, Deserialize)]
 pub struct SearchBookRequest {
@@ -66,6 +66,8 @@ pub struct SearchBookMultiRequest {
     book_source_urls: Option<Vec<String>>,
     #[serde(rename = "bookSourceGroup")]
     book_source_group: Option<String>,
+    #[serde(rename = "concurrentCount")]
+    concurrent_count: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -331,19 +333,56 @@ pub async fn search_book_multi(
         list
     };
 
-    let mut tasks = Vec::new();
-    for source in sources {
+    let concurrent_count = req.concurrent_count.unwrap_or(DEFAULT_SEARCH_CONCURRENT_COUNT).max(1) as usize;
+    // timeout() wraps the inner Result: outer = JoinHandle result, middle = timeout result, inner = search result
+    type InnerResult = Result<Vec<crate::model::search::SearchBook>, AppError>;
+    let mut set: JoinSet<Result<InnerResult, tokio::time::error::Elapsed>> = JoinSet::new();
+    let mut idx = 0usize;
+
+    // Kick off the first batch
+    while set.len() < concurrent_count && idx < sources.len() {
         let svc = state.book_service.clone();
-        let k = key.clone();
         let user_ns = user_ns.clone();
-        tasks.push(tokio::spawn(async move {
-            svc.search_book(&user_ns, &source, &k, page).await
-        }));
+        let source = sources[idx].clone();
+        let inner_key = key.clone();
+        set.spawn(async move {
+            timeout(
+                Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
+                svc.search_book(&user_ns, &source, &inner_key, page),
+            )
+            .await
+        });
+        idx += 1;
     }
+
     let mut results: Vec<crate::model::search::SearchBook> = Vec::new();
-    for t in tasks {
-        if let Ok(Ok(list)) = t.await {
-            results.extend(list);
+
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok(Ok(Ok(list))) => results.extend(list),
+            Ok(Ok(Err(e))) => {
+                tracing::warn!("search source error in multi: {:?}", e);
+            }
+            Ok(Err(_)) => {
+                // Timeout — skip this source
+            }
+            Err(_) => {}
+        }
+
+        // Feed more tasks while below concurrent limit
+        if idx < sources.len() {
+            let svc = state.book_service.clone();
+            let user_ns = user_ns.clone();
+            let source = sources[idx].clone();
+            let inner_key = key.clone();
+            set.spawn(async move {
+                timeout(
+                    Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
+                    svc.search_book(&user_ns, &source, &inner_key, page),
+                )
+                .await
+            });
+            idx += 1;
         }
     }
 
@@ -3359,7 +3398,7 @@ fn should_use_available_source_cache(
     result_limit: Option<i32>,
     last_index: Option<i32>,
 ) -> bool {
-    !refresh && result_limit.is_none() && last_index.is_none()
+    !refresh && result_limit.is_none() && (last_index.is_none() || last_index == Some(-1))
 }
 
 fn fallback_available_book(req: &GetAvailableBookSourceRequest) -> Option<Book> {
@@ -3708,6 +3747,9 @@ mod tests {
         assert!(!should_use_available_source_cache(true, None, None));
         assert!(!should_use_available_source_cache(false, Some(20), None));
         assert!(!should_use_available_source_cache(false, None, Some(0)));
+        // -1 means "initial load", same as None — should use cache
+        assert!(should_use_available_source_cache(false, None, Some(-1)));
+        assert!(should_use_available_source_cache(false, None, None));
     }
 
     #[test]

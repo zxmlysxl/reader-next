@@ -88,8 +88,8 @@ const defaultConfig: ReadConfig = {
   chineseMode: 'simplified',
   specialMode: 'normal',
   enablePreload: false,
-  showAiPanel: true,
-  enableChapterSummaryAuto: true,
+  showAiPanel: false,
+  enableChapterSummaryAuto: false,
   aiPanelLayout: 'auto',
   aiPanelSiderWidth: 360,
   aiPanelFontSize: 16,
@@ -273,6 +273,7 @@ export const useReaderStore = defineStore('reader', () => {
   const content = ref('')
   const loading = ref(false)
   const chaptersLoading = ref(false)
+  const bookInitLoading = ref(false)
   const bookmarks = ref<Bookmark[]>([])
   const replaceRules = ref<ReplaceRule[]>([])
   const preloadedContent = ref<Map<number, string>>(new Map()) // index -> content
@@ -1294,6 +1295,7 @@ export const useReaderStore = defineStore('reader', () => {
   /* ─── Book / chapter ops ─── */
   async function loadBook(b: Book) {
     loading.value = true
+    bookInitLoading.value = true
     const latestBook = await resolveLatestShelfBook(b)
     book.value = latestBook
     chapters.value = []
@@ -1313,13 +1315,24 @@ export const useReaderStore = defineStore('reader', () => {
       })
       if (chapters.value.length) {
         currentIndex.value = Math.max(0, Math.min(currentIndex.value, chapters.value.length - 1))
+        // Load first chapter automatically after chapter list is ready
+        const firstContent = await fetchChapterContent(currentIndex.value)
+        if (firstContent != null) {
+          const savedProgress = decodeServerProgress(latestBook.durChapterPos)
+          const isSavedChapter = currentIndex.value === (latestBook.durChapterIndex || 0)
+          setActiveChapterState(currentIndex.value, firstContent, isSavedChapter ? savedProgress : 0)
+          markChapterAsRead(currentIndex.value)
+        }
       }
       saveReaderSession()
     } catch (error) {
       loading.value = false
+      bookInitLoading.value = false
       throw error
     } finally {
       chaptersLoading.value = false
+      bookInitLoading.value = false
+      loading.value = false
     }
   }
 
@@ -1442,6 +1455,15 @@ export const useReaderStore = defineStore('reader', () => {
   }
 
   async function loadChapter(index: number, forceRefresh = false) {
+    if (!book.value) return
+    // Wait for chapter list if still loading
+    if (chaptersLoading.value) {
+      await new Promise<void>((resolve) => {
+        const unwatch = watch(chaptersLoading, (val) => {
+          if (!val) { unwatch(); resolve() }
+        })
+      })
+    }
     if (!book.value || !chapters.value[index]) return
 
     loading.value = true
@@ -1472,7 +1494,7 @@ export const useReaderStore = defineStore('reader', () => {
 
   async function preloadAroundChapter(index: number) {
     if (!book.value || !config.enablePreload) return
-    const targets = [index + 1, index + 2, index - 1]
+    const targets = [index + 1, index + 2, index - 1, index - 2]
       .filter((target, pos, list) => target >= 0 && target < chapters.value.length && list.indexOf(target) === pos)
     for (const target of targets) {
       await preloadNextChapter(target)
@@ -1482,8 +1504,8 @@ export const useReaderStore = defineStore('reader', () => {
   async function preloadNextChapter(index: number) {
     if (!book.value || !config.enablePreload || index >= chapters.value.length || preloadedContent.value.has(index)) return
     
-    // Keep max 3 preloaded chapters
-    if (preloadedContent.value.size > 3) {
+    // Keep max 5 preloaded chapters (current ±2)
+    if (preloadedContent.value.size > 5) {
       const firstKey = preloadedContent.value.keys().next().value
       if (firstKey !== undefined) preloadedContent.value.delete(firstKey)
     }
@@ -1705,7 +1727,7 @@ export const useReaderStore = defineStore('reader', () => {
   }
 
   return {
-    book, chapters, currentIndex, content, loading, chaptersLoading,
+    book, chapters, currentIndex, content, loading, chaptersLoading, bookInitLoading,
     currentChapter, hasNext, hasPrev, readingProgress,
       loadBook, loadChapter, fetchChapterContent, setActiveChapterState, refreshContent, nextChapter, prevChapter, clear,
       chapterScrollProgress, setChapterScrollProgress,
