@@ -120,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useReaderStore } from '../../stores/reader'
 import { useAppStore } from '../../stores/app'
 import { getAvailableBookSourceSSE } from '../../api/search'
@@ -148,39 +148,6 @@ const selectedCandidate = ref<CandidateItem | null>(null)
 const candidatePreview = ref<Book | null>(null)
 const AVAILABLE_CONCURRENT_COUNT = 8
 let availableSourceSSE: EventSource | null = null
-let lastSeenBookUrl: string | null = null
-
-// Per-bookUrl persistent cache — survives component remount via localStorage
-const CACHE_KEY = 'reader_source_cache'
-const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
-
-type CacheEntry = {
-  results: SearchBook[]
-  lastIndex: number
-  hasMoreSources: boolean
-  ts: number
-}
-
-function loadCache(): Map<string, CacheEntry> {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY)
-    if (!raw) return new Map()
-    const parsed = JSON.parse(raw) as [string, CacheEntry][]
-    return new Map(parsed)
-  } catch {
-    return new Map()
-  }
-}
-
-function saveCache(cache: Map<string, CacheEntry>) {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify([...cache]))
-  } catch {
-    // storage full or unavailable — silently ignore
-  }
-}
-
-let sourceCache: Map<string, CacheEntry> = loadCache()
 
 const currentSource = computed(() => {
   if (!store.book) return null
@@ -221,69 +188,9 @@ const preparedResults = computed<CandidateItem[]>(() => {
     .sort((a, b) => b.score - a.score)
 })
 
-watch(() => store.book?.bookUrl, (newUrl) => {
-  if (!newUrl) return
-  const isNewBook = lastSeenBookUrl !== null && lastSeenBookUrl !== newUrl
-  lastSeenBookUrl = newUrl
-  if (isNewBook) {
-    // Different book: restore from cache or start fresh
-    const cached = sourceCache.get(newUrl)
-    if (cached && Date.now() - cached.ts <= CACHE_TTL) {
-      results.value = cached.results
-      lastIndex.value = cached.lastIndex
-      hasMoreSources.value = cached.hasMoreSources
-      selectedCandidate.value = null
-      candidatePreview.value = null
-      if (preparedResults.value.length) {
-        searching.value = false
-        void selectCandidate(preparedResults.value[0])
-      }
-    } else {
-      startSearch()
-    }
-  }
-  // Same book (different origin): keep existing results —
-  // the new origin will show as "current source" at the top
-  // and the full results list stays available for the user.
-}, { immediate: false })
-
 onMounted(() => {
-  if (!store.book) return
-  const currentBookUrl = store.book.bookUrl
-  const isFirstMount = lastSeenBookUrl === null
-  const isNewBook = !isFirstMount && lastSeenBookUrl !== currentBookUrl
-  lastSeenBookUrl = currentBookUrl
-  if (isFirstMount || isNewBook) {
-    // First mount or different book: restore from cache or start fresh
-    const cached = sourceCache.get(currentBookUrl)
-    if (!cached || Date.now() - cached.ts > CACHE_TTL) {
-      startSearch()
-    } else {
-      results.value = cached.results
-      lastIndex.value = cached.lastIndex
-      hasMoreSources.value = cached.hasMoreSources
-      selectedCandidate.value = null
-      candidatePreview.value = null
-      if (preparedResults.value.length) {
-        searching.value = false
-        void selectCandidate(preparedResults.value[0])
-      }
-    }
-  }
-  // Same book (different origin after source switch): keep existing results
+  startSearch()
 })
-
-
-function persistToCache() {
-  if (!store.book || !results.value.length) return
-  sourceCache.set(store.book.bookUrl, {
-    results: results.value.slice(),
-    lastIndex: lastIndex.value,
-    hasMoreSources: hasMoreSources.value,
-    ts: Date.now(),
-  })
-  saveCache(sourceCache)
-}
 
 onUnmounted(() => {
   closeAvailableSourceSSE()
@@ -306,10 +213,8 @@ function startSearch() {
 function mergeCandidates(candidates: SearchBook[]) {
   if (!store.book || !candidates.length) return
   const currentBook = store.book
-  const currentAuthor = normalizeAuthorText(currentBook.author)
   candidates.forEach((item) => {
     if (item.origin === currentBook.origin) return
-    if (currentAuthor && item.author && normalizeAuthorText(item.author) !== currentAuthor) return
     const existed = results.value.some((candidate) =>
       candidate.origin === item.origin || (candidate.bookUrl === item.bookUrl && candidate.origin === item.origin),
     )
@@ -409,8 +314,6 @@ function finishAvailableSourceSSE(
     loadingMore.value = false
   }
 
-  persistToCache()
-
   if (!selectedCandidate.value && preparedResults.value.length) {
     void selectCandidate(preparedResults.value[0])
   }
@@ -449,7 +352,6 @@ function loadMoreSources() {
 
   closeAvailableSourceSSE()
   loadingMore.value = true
-  persistToCache()
   openAvailableSourceSSE('loadMore')
 }
 
