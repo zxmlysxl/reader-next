@@ -334,9 +334,9 @@ pub async fn search_book_multi(
     };
 
     let concurrent_count = req.concurrent_count.unwrap_or(DEFAULT_SEARCH_CONCURRENT_COUNT).max(1) as usize;
-    // spawn + timeout: join_handle wraps Result<T, E>, timeout wraps that -> Result<Result<T, E>, Elapsed>
-    type SearchOut = Result<Vec<crate::model::search::SearchBook>, AppError>;
-    let mut set: JoinSet<tokio::time::error::Elapsed> = JoinSet::new();
+    // timeout() wraps the inner Result: outer = JoinHandle result, middle = timeout result, inner = search result
+    type InnerResult = Result<Vec<crate::model::search::SearchBook>, AppError>;
+    let mut set: JoinSet<Result<InnerResult, tokio::time::error::Elapsed>> = JoinSet::new();
     let mut idx = 0usize;
 
     // Kick off the first batch
