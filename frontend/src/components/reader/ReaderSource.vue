@@ -149,6 +149,58 @@ const candidatePreview = ref<Book | null>(null)
 const AVAILABLE_CONCURRENT_COUNT = 8
 let availableSourceSSE: EventSource | null = null
 
+// ─── localStorage persistence ───────────────────────────────────────────────
+const SOURCE_CACHE_PREFIX = 'book-source-candidates:'
+
+function cacheKey(bookUrl: string, origin: string) {
+  return SOURCE_CACHE_PREFIX + btoa(encodeURIComponent(bookUrl + '|' + origin))
+}
+
+function loadCachedResults(): SearchBook[] {
+  if (!store.book) return []
+  try {
+    const raw = localStorage.getItem(cacheKey(store.book.bookUrl, store.book.origin))
+    if (raw) {
+      const cached = JSON.parse(raw) as { results: SearchBook[]; lastIndex: number; hasMore: boolean }
+      if (Array.isArray(cached.results) && cached.results.length > 0) {
+        lastIndex.value = cached.lastIndex ?? -1
+        hasMoreSources.value = cached.hasMore ?? true
+        return cached.results
+      }
+    }
+  } catch { /* ignore */ }
+  return []
+}
+
+function saveCachedResults() {
+  if (!store.book) return
+  localStorage.setItem(cacheKey(store.book.bookUrl, store.book.origin), JSON.stringify({
+    results: results.value,
+    lastIndex: lastIndex.value,
+    hasMore: hasMoreSources.value,
+  }))
+}
+
+function loadCachedSelected(): CandidateItem | null {
+  if (!store.book) return null
+  try {
+    const raw = localStorage.getItem('book-source-selected:' + btoa(encodeURIComponent(store.book.bookUrl + '|' + store.book.origin)))
+    if (raw) return JSON.parse(raw) as CandidateItem
+  } catch { /* ignore */ }
+  return null
+}
+
+function saveCachedSelected() {
+  if (!store.book || !selectedCandidate.value) return
+  localStorage.setItem('book-source-selected:' + btoa(encodeURIComponent(store.book.bookUrl + '|' + store.book.origin)), JSON.stringify(selectedCandidate.value))
+}
+
+function clearSelectedCache() {
+  if (!store.book) return
+  localStorage.removeItem('book-source-selected:' + btoa(encodeURIComponent(store.book.bookUrl + '|' + store.book.origin)))
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 const currentSource = computed(() => {
   if (!store.book) return null
   return {
@@ -189,7 +241,20 @@ const preparedResults = computed<CandidateItem[]>(() => {
 })
 
 onMounted(() => {
-  startSearch()
+  const cached = loadCachedResults()
+  if (cached.length > 0) {
+    results.value = cached
+    const sel = loadCachedSelected()
+    if (sel) {
+      selectedCandidate.value = sel
+      // restore candidatePreview to null so it re-fetches
+      void selectCandidate(sel)
+    } else if (preparedResults.value.length) {
+      void selectCandidate(preparedResults.value[0])
+    }
+  } else {
+    startSearch()
+  }
 })
 
 onUnmounted(() => {
@@ -201,9 +266,12 @@ function startSearch() {
   closeAvailableSourceSSE()
   searching.value = true
   loadingMore.value = false
-  results.value = []
-  lastIndex.value = -1
-  hasMoreSources.value = true
+  // Keep existing cached results when re-opening panel
+  if (!results.value.length) {
+    results.value = []
+    lastIndex.value = -1
+    hasMoreSources.value = true
+  }
   selectedCandidate.value = null
   candidatePreview.value = null
 
@@ -222,6 +290,8 @@ function mergeCandidates(candidates: SearchBook[]) {
       results.value.push(item)
     }
   })
+  // Persist merged results
+  saveCachedResults()
 }
 
 type AvailableSourceMode = 'initial' | 'loadMore'
@@ -359,6 +429,8 @@ async function handleSwitch(res: SearchBook) {
   if (store.loading) return
   try {
     const nextBook = await store.switchSource(res.bookUrl, res.origin)
+    // Clear selected state so next "切换书源" open starts fresh for new book
+    clearSelectedCache()
     store.closePanel()
     appStore.showToast(`已切换到 ${nextBook?.originName || nextBook?.origin || res.origin}`, 'success')
   } catch (e: any) {
