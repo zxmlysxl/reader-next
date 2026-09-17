@@ -189,6 +189,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/reader3/getAvailableBookSourceSSE",
+            get(handlers::get_available_book_sources),
             get(handlers::get_available_book_source_sse),
         )
         .route(

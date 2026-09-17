@@ -2790,6 +2790,52 @@ pub async fn get_available_book_source(
     )))
 }
 
+pub async fn get_available_book_sources(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Query(req): Query<GetAvailableBookSourceRequest>,
+) -> Result<Json<ApiResponse<AvailableBookSourceResponse>>, AppError> {
+    let user_ns = state
+        .user_service
+        .resolve_user_ns_with_override(auth.access_token(), auth.secure_key(), auth.user_ns())
+        .await
+        .map_err(|_| AppError::BadRequest("NEED_LOGIN".to_string()))?;
+
+    let book_url = req
+        .url
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("url required".to_string()))?;
+
+    // Return all book instances for this book_url from DB
+    let books = state
+        .book_service
+        .get_available_book_sources(&user_ns, book_url)
+        .await?;
+
+    let result: Vec<SearchBook> = books
+        .into_iter()
+        .map(|b| SearchBook {
+            name: b.name,
+            author: b.author,
+            book_url: b.book_url,
+            origin: b.origin,
+            cover_url: b.cover_url,
+            intro: b.intro,
+            kind: b.kind,
+            last_chapter: b.latest_chapter_title,
+            update_time: b.update_time,
+            word_count: b.word_count,
+            book_source_urls: None,
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::ok(AvailableBookSourceResponse {
+        books: result,
+        last_index: 0,
+        has_more: false,
+    })))
+}
+
 pub async fn get_available_book_source_sse(
     State(state): State<AppState>,
     auth: AuthContext,

@@ -13,6 +13,7 @@ use crate::model::{
 use crate::parser::js::{eval_js, eval_js_with_bindings, with_js_lib};
 use crate::parser::rule_engine::RuleEngine;
 use crate::storage::cache::file_cache::FileCache;
+use crate::storage::db::repo::BookRepo;
 use crate::util::hash::md5_hex;
 use crate::util::text::{normalize_source_url, repair_encoded_url};
 use serde_json::json;
@@ -28,6 +29,7 @@ pub struct BookService {
     http: HttpClient,
     parser: RuleEngine,
     cache: FileCache,
+    book_repo: BookRepo,
     storage_dir: PathBuf,
     source_cookies: Arc<RwLock<HashMap<String, String>>>,
     rate_states: Arc<RwLock<HashMap<String, RateState>>>,
@@ -55,12 +57,13 @@ pub struct BookSourceAvailability {
 }
 
 impl BookService {
-    pub fn new(http: HttpClient, parser: RuleEngine, cache: FileCache, storage_dir: &str) -> Self {
+    pub fn new(http: HttpClient, parser: RuleEngine, cache: FileCache, book_repo: BookRepo, storage_dir: &str) -> Self {
         let storage_dir = PathBuf::from(storage_dir);
         Self {
             http,
             parser,
             cache,
+            book_repo,
             storage_dir,
             source_cookies: Arc::new(RwLock::new(HashMap::new())),
             rate_states: Arc::new(RwLock::new(HashMap::new())),
@@ -718,6 +721,24 @@ impl BookService {
             .find(|b| b.name.trim() == name.trim() && b.author.trim() == author.trim()))
     }
 
+    /// Get all available book instances for a given bookUrl across all sources.
+    /// Returns all books in the shelf that match the bookUrl (including from all origins).
+    pub async fn get_available_book_sources(
+        &self,
+        user_ns: &str,
+        book_url: &str,
+    ) -> Result<Vec<Book>, AppError> {
+        let books = self.book_repo.get_by_book_url(user_ns, book_url).await?;
+        let mut result: Vec<Book> = Vec::with_capacity(books.len());
+        for json in books {
+            match serde_json::from_str::<Book>(&json) {
+                Ok(book) => result.push(book),
+                Err(e) => tracing::warn!("failed to deserialize book from db: {:?}", e),
+            }
+        }
+        Ok(result)
+    }
+
     pub async fn save_book(&self, user_ns: &str, mut book: Book) -> Result<Book, AppError> {
         sanitize_book_urls(&mut book);
         if book.origin.trim().is_empty() {
@@ -803,17 +824,19 @@ impl BookService {
     }
 
     pub async fn delete_book(&self, user_ns: &str, book: &Book) -> Result<bool, AppError> {
-        let mut list = self.read_bookshelf(user_ns).await?;
-        let orig_len = list.len();
-        let removed: Vec<Book> = list
-            .iter()
-            .filter(|b| books_match_for_delete(b, book))
-            .cloned()
-            .collect();
-        list.retain(|b| !books_match_for_delete(b, book));
-        let deleted = list.len() != orig_len;
+        // Get the specific book from DB to find all matching origin variants
+        let existing = self.book_repo.get(user_ns, &book.book_url, &book.origin).await?;
+        let removed: Vec<Book> = if let Some(json) = existing {
+            if let Ok(b) = serde_json::from_str::<Book>(&json) {
+                vec![b]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+        let deleted = self.book_repo.delete(user_ns, &book.book_url, &book.origin).await?;
         if deleted {
-            self.write_bookshelf(user_ns, &list).await?;
             for removed_book in &removed {
                 let _ = self.clear_book_related_cache(user_ns, removed_book).await;
             }
@@ -822,26 +845,12 @@ impl BookService {
     }
 
     pub async fn delete_books(&self, user_ns: &str, books: Vec<Book>) -> Result<usize, AppError> {
-        let mut list = self.read_bookshelf(user_ns).await?;
         let mut deleted = 0usize;
-        let mut removed_books: Vec<Book> = Vec::new();
         for book in books {
-            let matched: Vec<Book> = list
-                .iter()
-                .filter(|b| books_match_for_delete(b, &book))
-                .cloned()
-                .collect();
-            removed_books.extend(matched);
-            let before = list.len();
-            list.retain(|b| !books_match_for_delete(b, &book));
-            if list.len() != before {
+            let existed = self.book_repo.delete(user_ns, &book.book_url, &book.origin).await?;
+            if existed {
+                let _ = self.clear_book_related_cache(user_ns, &book).await;
                 deleted += 1;
-            }
-        }
-        if deleted > 0 {
-            self.write_bookshelf(user_ns, &list).await?;
-            for removed_book in &removed_books {
-                let _ = self.clear_book_related_cache(user_ns, removed_book).await;
             }
         }
         Ok(deleted)
@@ -1007,6 +1016,25 @@ impl BookService {
     }
 
     async fn read_bookshelf(&self, user_ns: &str) -> Result<Vec<Book>, AppError> {
+        // Try database first
+        let db_jsons = self.book_repo.list(user_ns).await?;
+        if !db_jsons.is_empty() {
+            let mut books: Vec<Book> = Vec::with_capacity(db_jsons.len());
+            for json in db_jsons {
+                match serde_json::from_str::<Book>(&json) {
+                    Ok(mut book) => {
+                        sanitize_book_urls(&mut book);
+                        books.push(book);
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to deserialize book from db: {:?}", e);
+                    }
+                }
+            }
+            return Ok(books);
+        }
+
+        // Fallback to legacy JSON file (and migrate it)
         let path = self.bookshelf_path(user_ns);
         if !path.exists() {
             return Ok(Vec::new());
@@ -1025,27 +1053,26 @@ impl BookService {
                     path.display(),
                     recovered.len()
                 );
-                self.write_bookshelf(user_ns, &recovered).await?;
                 recovered
             }
         };
         for book in &mut list {
             sanitize_book_urls(book);
         }
+        // Migrate from JSON to database
+        if !list.is_empty() {
+            let count = self.book_repo.migrate_from_json(user_ns, &list).await?;
+            tracing::info!("migrated {} books from JSON to DB for user_ns={}", count, user_ns);
+        }
         Ok(list)
     }
 
-    async fn write_bookshelf(&self, user_ns: &str, list: &Vec<Book>) -> Result<(), AppError> {
-        let path = self.bookshelf_path(user_ns);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
+    async fn write_bookshelf(&self, user_ns: &str, list: &[Book]) -> Result<(), AppError> {
+        // Write to database
+        for book in list {
+            let json = serde_json::to_string(book).map_err(|e| AppError::Internal(e.into()))?;
+            self.book_repo.upsert(user_ns, book, &json).await?;
         }
-        let data = serde_json::to_string(list).map_err(|e| AppError::BadRequest(e.to_string()))?;
-        fs::write(&path, data)
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
         Ok(())
     }
 

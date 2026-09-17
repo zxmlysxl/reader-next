@@ -36,7 +36,8 @@ pub async fn run() -> anyhow::Result<()> {
 
     let pool = db::init_pool(&cfg.database_url).await?;
     println!("DEBUG: db pool initialized");
-    let repo = db::repo::BookSourceRepo::new(pool.clone());
+    let book_source_repo = db::repo::BookSourceRepo::new(pool.clone());
+    let book_repo = db::repo::BookRepo::new(pool.clone());
 
     let http = HttpClient::new(cfg.request_timeout_secs, None)?;
     println!("DEBUG: http client created");
@@ -44,8 +45,8 @@ pub async fn run() -> anyhow::Result<()> {
     println!("DEBUG: rule engine created");
     let cache = FileCache::new(format!("{}/cache", cfg.storage_dir));
 
-    let book_service = Arc::new(BookService::new(http, parser, cache, &cfg.storage_dir));
-    let book_source_service = Arc::new(BookSourceService::new(repo, &cfg.storage_dir));
+    let book_service = Arc::new(BookService::new(http, parser, cache, book_repo.clone(), &cfg.storage_dir));
+    let book_source_service = Arc::new(BookSourceService::new(book_source_repo, &cfg.storage_dir));
     let local_txt_book_service = Arc::new(LocalTxtBookService::new(&cfg.storage_dir));
     let local_epub_book_service = Arc::new(LocalEpubBookService::new(&cfg.storage_dir));
     let local_mobi_book_service = Arc::new(LocalMobiBookService::new(&cfg.storage_dir));
