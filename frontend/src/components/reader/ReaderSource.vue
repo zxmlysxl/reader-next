@@ -120,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useReaderStore } from '../../stores/reader'
 import { useAppStore } from '../../stores/app'
 import { getAvailableBookSourceSSE } from '../../api/search'
@@ -148,6 +148,15 @@ const selectedCandidate = ref<CandidateItem | null>(null)
 const candidatePreview = ref<Book | null>(null)
 const AVAILABLE_CONCURRENT_COUNT = 8
 let availableSourceSSE: EventSource | null = null
+
+// Per-bookUrl persistent cache for available sources
+const sourceCache = new Map<string, {
+  results: SearchBook[]
+  lastIndex: number
+  hasMoreSources: boolean
+  ts: number
+}>()
+const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
 
 const currentSource = computed(() => {
   if (!store.book) return null
@@ -189,8 +198,40 @@ const preparedResults = computed<CandidateItem[]>(() => {
 })
 
 onMounted(() => {
-  startSearch()
+  hydrateFromCache()
+  if (!store.book) return
+  const cached = sourceCache.get(store.book.bookUrl)
+  if (!cached || Date.now() - cached.ts > CACHE_TTL) {
+    startSearch()
+  } else {
+    results.value = cached.results
+    lastIndex.value = cached.lastIndex
+    hasMoreSources.value = cached.hasMoreSources
+    if (selectedCandidate.value == null && preparedResults.value.length) {
+      void selectCandidate(preparedResults.value[0])
+    }
+  }
 })
+
+function hydrateFromCache() {
+  if (!store.book) return
+  const cached = sourceCache.get(store.book.bookUrl)
+  if (cached && Date.now() - cached.ts <= CACHE_TTL) {
+    results.value = cached.results
+    lastIndex.value = cached.lastIndex
+    hasMoreSources.value = cached.hasMoreSources
+  }
+}
+
+function persistToCache() {
+  if (!store.book || !results.value.length) return
+  sourceCache.set(store.book.bookUrl, {
+    results: results.value.slice(),
+    lastIndex: lastIndex.value,
+    hasMoreSources: hasMoreSources.value,
+    ts: Date.now(),
+  })
+}
 
 onUnmounted(() => {
   closeAvailableSourceSSE()
@@ -316,6 +357,8 @@ function finishAvailableSourceSSE(
     loadingMore.value = false
   }
 
+  persistToCache()
+
   if (!selectedCandidate.value && preparedResults.value.length) {
     void selectCandidate(preparedResults.value[0])
   }
@@ -354,6 +397,7 @@ function loadMoreSources() {
 
   closeAvailableSourceSSE()
   loadingMore.value = true
+  persistToCache()
   openAvailableSourceSSE('loadMore')
 }
 
