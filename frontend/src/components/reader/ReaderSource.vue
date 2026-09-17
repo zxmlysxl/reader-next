@@ -221,7 +221,7 @@ const preparedResults = computed<CandidateItem[]>(() => {
 })
 
 watch(() => store.book?.bookUrl, (newUrl, oldUrl) => {
-  if (!newUrl || newUrl === oldUrl) return
+  if (!newUrl) return
   // Book changed: restore from cache or start fresh
   const cached = sourceCache.get(newUrl)
   if (cached && Date.now() - cached.ts <= CACHE_TTL) {
@@ -231,7 +231,7 @@ watch(() => store.book?.bookUrl, (newUrl, oldUrl) => {
     selectedCandidate.value = null
     candidatePreview.value = null
     if (preparedResults.value.length) {
-    searching.value = false
+      searching.value = false
       void selectCandidate(preparedResults.value[0])
     }
   } else {
@@ -240,7 +240,6 @@ watch(() => store.book?.bookUrl, (newUrl, oldUrl) => {
 }, { immediate: false })
 
 onMounted(() => {
-  hydrateFromCache()
   if (!store.book) return
   const cached = sourceCache.get(store.book.bookUrl)
   if (!cached || Date.now() - cached.ts > CACHE_TTL) {
@@ -252,7 +251,7 @@ onMounted(() => {
     selectedCandidate.value = null
     candidatePreview.value = null
     if (preparedResults.value.length) {
-    searching.value = false
+      searching.value = false
       void selectCandidate(preparedResults.value[0])
     }
   }
