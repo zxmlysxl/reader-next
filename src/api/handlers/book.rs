@@ -66,6 +66,8 @@ pub struct SearchBookMultiRequest {
     book_source_urls: Option<Vec<String>>,
     #[serde(rename = "bookSourceGroup")]
     book_source_group: Option<String>,
+    #[serde(rename = "concurrentCount")]
+    concurrent_count: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -331,19 +333,51 @@ pub async fn search_book_multi(
         list
     };
 
-    let mut tasks = Vec::new();
-    for source in sources {
+    let concurrent_count = req.concurrent_count.unwrap_or(DEFAULT_SEARCH_CONCURRENT_COUNT).max(1) as usize;
+    let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
+    let mut idx = 0usize;
+
+    // Helper closure to build a timeout-wrapped spawn
+    let spawn_one = |svc: _, user_ns: _, source: _, k: _, page: _| {
+        tokio::spawn(async move {
+            timeout(
+                Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
+                svc.search_book(&user_ns, &source, &k, page),
+            )
+            .await
+        })
+    };
+
+    // Kick off the first batch
+    while tasks.len() < concurrent_count && idx < sources.len() {
         let svc = state.book_service.clone();
-        let k = key.clone();
         let user_ns = user_ns.clone();
-        tasks.push(tokio::spawn(async move {
-            svc.search_book(&user_ns, &source, &k, page).await
-        }));
+        let source = sources[idx].clone();
+        tasks.push(spawn_one(svc, user_ns, source, key.clone(), page));
+        idx += 1;
     }
+
     let mut results: Vec<crate::model::search::SearchBook> = Vec::new();
-    for t in tasks {
-        if let Ok(Ok(list)) = t.await {
-            results.extend(list);
+
+    while let Some(res) = tasks.next().await {
+        match res {
+            Ok(Ok(Ok(list))) => results.extend(list),
+            Ok(Ok(Err(e))) => {
+                tracing::warn!("search source error in multi: {:?}", e);
+            }
+            Ok(Err(_)) => {
+                // Timeout — skip this source
+            }
+            Err(_) => {}
+        }
+
+        // Feed more tasks while below concurrent limit
+        if idx < sources.len() {
+            let svc = state.book_service.clone();
+            let user_ns = user_ns.clone();
+            let source = sources[idx].clone();
+            tasks.push(spawn_one(svc, user_ns, source, key.clone(), page));
+            idx += 1;
         }
     }
 
