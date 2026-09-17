@@ -62,9 +62,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
-          no-cache-fallback: true
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=max
 
       - name: Export digest
         run: |
