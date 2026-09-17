@@ -1,6 +1,6 @@
 use crate::api::auth::AuthContext;
 use crate::api::AppState;
-use crate::db;
+use crate::storage::db;
 use crate::error::error::{ApiResponse, AppError};
 use crate::model::{
     book::Book,
