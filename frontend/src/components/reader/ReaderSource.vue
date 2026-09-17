@@ -220,7 +220,7 @@ const preparedResults = computed<CandidateItem[]>(() => {
     .sort((a, b) => b.score - a.score)
 })
 
-watch(() => store.book?.bookUrl, (newUrl, oldUrl) => {
+watch(() => store.book?.bookUrl, (newUrl) => {
   if (!newUrl) return
   // Book changed: restore from cache or start fresh
   const cached = sourceCache.get(newUrl)
@@ -257,16 +257,6 @@ onMounted(() => {
   }
 })
 
-function hydrateFromCache() {
-  if (!store.book) return
-  const cached = sourceCache.get(store.book.bookUrl)
-  if (cached && Date.now() - cached.ts <= CACHE_TTL) {
-    results.value = cached.results
-    lastIndex.value = cached.lastIndex
-    hasMoreSources.value = cached.hasMoreSources
-    searching.value = false
-  }
-}
 
 function persistToCache() {
   if (!store.book || !results.value.length) return
