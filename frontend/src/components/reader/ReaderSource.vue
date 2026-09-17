@@ -415,6 +415,7 @@ async function selectCandidate(item: CandidateItem) {
   } catch {
     candidatePreview.value = null
   }
+  saveCachedSelected()
 }
 
 function loadMoreSources() {
