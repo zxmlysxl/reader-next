@@ -373,10 +373,11 @@ pub async fn search_book_multi(
             let svc = state.book_service.clone();
             let user_ns = user_ns.clone();
             let source = sources[idx].clone();
+            let key = key.clone();
             set.spawn(async move {
                 timeout(
                     Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
-                    svc.search_book(&user_ns, &source, &key.clone(), page),
+                    svc.search_book(&user_ns, &source, &key, page),
                 )
                 .await
             });
