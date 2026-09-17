@@ -220,3 +220,130 @@ impl BookRepo {
         Ok(count)
     }
 }
+
+// ── BookSourceCandidateRepo ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BookSourceCandidate {
+    pub name: String,
+    pub author: String,
+    pub book_url: String,
+    pub origin: String,
+    pub cover_url: Option<String>,
+    pub intro: Option<String>,
+    pub kind: Option<String>,
+    pub latest_chapter_title: Option<String>,
+    pub update_time: Option<i64>,
+    pub word_count: Option<i64>,
+}
+
+pub struct BookSourceCandidateRepo {
+    pool: SqlitePool,
+}
+
+impl BookSourceCandidateRepo {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    /// Upsert candidates for a book_url — replaces all candidates for that book_url for this user.
+    pub async fn upsert_candidates(
+        &self,
+        user_ns: &str,
+        book_url: &str,
+        candidates: &[BookSourceCandidate],
+    ) -> Result<(), AppError> {
+        let mut tx = sqlx::Acquire::begin(&self.pool).await?;
+        // Delete existing candidates for this book_url
+        sqlx::query("DELETE FROM book_source_candidates WHERE user_ns=?1 AND book_url=?2")
+            .bind(user_ns)
+            .bind(book_url)
+            .execute(&mut *tx)
+            .await?;
+        let now = now_ts();
+        for c in candidates {
+            sqlx::query(
+                "INSERT INTO book_source_candidates (user_ns, book_url, name, author, origin, \
+                 cover_url, intro, kind, latest_chapter_title, update_time, word_count, found_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+            )
+            .bind(user_ns)
+            .bind(&c.book_url)
+            .bind(&c.name)
+            .bind(&c.author)
+            .bind(&c.origin)
+            .bind(&c.cover_url)
+            .bind(&c.intro)
+            .bind(&c.kind)
+            .bind(&c.latest_chapter_title)
+            .bind(&c.update_time)
+            .bind(&c.word_count)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Get all candidates for a book_url
+    pub async fn get_candidates(
+        &self,
+        user_ns: &str,
+        book_url: &str,
+    ) -> Result<Vec<BookSourceCandidate>, AppError> {
+        let rows = sqlx::query_as::<_, BookSourceCandidateRow>(
+            "SELECT name, author, book_url, origin, cover_url, intro, kind, \
+             latest_chapter_title, update_time, word_count \
+             FROM book_source_candidates WHERE user_ns=?1 AND book_url=?2 ORDER BY found_at DESC"
+        )
+        .bind(user_ns)
+        .bind(book_url)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    /// Delete all candidates for a book_url
+    pub async fn delete_candidates(&self, user_ns: &str, book_url: &str) -> Result<u64, AppError> {
+        let result = sqlx::query(
+            "DELETE FROM book_source_candidates WHERE user_ns=?1 AND book_url=?2"
+        )
+        .bind(user_ns)
+        .bind(book_url)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct BookSourceCandidateRow {
+    name: String,
+    author: String,
+    book_url: String,
+    origin: String,
+    cover_url: Option<String>,
+    intro: Option<String>,
+    kind: Option<String>,
+    latest_chapter_title: Option<String>,
+    update_time: Option<i64>,
+    word_count: Option<i64>,
+}
+
+impl From<BookSourceCandidateRow> for BookSourceCandidate {
+    fn from(r: BookSourceCandidateRow) -> Self {
+        Self {
+            name: r.name,
+            author: r.author,
+            book_url: r.book_url,
+            origin: r.origin,
+            cover_url: r.cover_url,
+            intro: r.intro,
+            kind: r.kind,
+            latest_chapter_title: r.latest_chapter_title,
+            update_time: r.update_time,
+            word_count: r.word_count,
+        }
+    }
+}

@@ -1,5 +1,6 @@
 use crate::api::auth::AuthContext;
 use crate::api::AppState;
+use crate::db;
 use crate::error::error::{ApiResponse, AppError};
 use crate::model::{
     book::Book,
@@ -2611,9 +2612,24 @@ pub async fn search_book_source_sse(
         }
 
         if refresh || !all_results.is_empty() {
+            let candidates: Vec<_> = all_results
+                .iter()
+                .map(|b| db::repo::BookSourceCandidate {
+                    name: b.name.clone(),
+                    author: b.author.clone(),
+                    book_url: b.book_url.clone(),
+                    origin: b.origin.clone(),
+                    cover_url: b.cover_url.clone(),
+                    intro: b.intro.clone(),
+                    kind: b.kind.clone(),
+                    latest_chapter_title: b.last_chapter.clone(),
+                    update_time: b.update_time,
+                    word_count: b.word_count,
+                })
+                .collect();
             let _ = state_clone
-                .book_service
-                .save_book_sources_cache(&user_ns, &book.book_url, &all_results)
+                .book_source_candidate_repo
+                .upsert_candidates(&user_ns, &book.book_url, &candidates)
                 .await;
         }
         let _ = tx
@@ -2675,11 +2691,27 @@ pub async fn get_available_book_source(
     let book = book.ok_or_else(|| AppError::BadRequest("书籍信息错误".to_string()))?;
     if !paged_request {
         if let Some(ref url) = book_url {
-            if let Some(list) = state
-                .book_service
-                .load_book_sources_cache(&user_ns, url)
-                .await?
+            if let Ok(candidates) = state
+                .book_source_candidate_repo
+                .get_candidates(&user_ns, url)
+                .await
             {
+                let list: Vec<SearchBook> = candidates
+                    .into_iter()
+                    .map(|c| SearchBook {
+                        name: c.name,
+                        author: c.author,
+                        book_url: c.book_url,
+                        origin: c.origin,
+                        cover_url: c.cover_url,
+                        intro: c.intro,
+                        kind: c.kind,
+                        last_chapter: c.latest_chapter_title,
+                        update_time: c.update_time,
+                        word_count: c.word_count,
+                        book_source_urls: None,
+                    })
+                    .collect();
                 let list = take_available_source_cached_matches(
                     list,
                     None,
@@ -2771,9 +2803,24 @@ pub async fn get_available_book_source(
 
     let has_more = (last_index + 1).max(0) < sources.len() as i32;
     if !has_more && req.last_index.unwrap_or(-1) < 0 {
+        let candidates: Vec<_> = result
+            .iter()
+            .map(|b| db::repo::BookSourceCandidate {
+                name: b.name.clone(),
+                author: b.author.clone(),
+                book_url: b.book_url.clone(),
+                origin: b.origin.clone(),
+                cover_url: b.cover_url.clone(),
+                intro: b.intro.clone(),
+                kind: b.kind.clone(),
+                latest_chapter_title: b.last_chapter.clone(),
+                update_time: b.update_time,
+                word_count: b.word_count,
+            })
+            .collect();
         let _ = state
-            .book_service
-            .save_book_sources_cache(&user_ns, &book.book_url, &result)
+            .book_source_candidate_repo
+            .upsert_candidates(&user_ns, &book.book_url, &candidates)
             .await;
     }
 
@@ -2874,12 +2921,28 @@ pub async fn get_available_book_source_sse(
 
     if !refresh && last_index_start < 0 {
         if let Some(ref url) = book_url {
-            if let Some(cached) = state
-                .book_service
-                .load_book_sources_cache(&user_ns, url)
-                .await?
+            if let Ok(candidates) = state
+                .book_source_candidate_repo
+                .get_candidates(&user_ns, url)
+                .await
             {
                 let current_origin = book.origin.clone();
+                let cached: Vec<SearchBook> = candidates
+                    .into_iter()
+                    .map(|c| SearchBook {
+                        name: c.name,
+                        author: c.author,
+                        book_url: c.book_url,
+                        origin: c.origin,
+                        cover_url: c.cover_url,
+                        intro: c.intro,
+                        kind: c.kind,
+                        last_chapter: c.latest_chapter_title,
+                        update_time: c.update_time,
+                        word_count: c.word_count,
+                        book_source_urls: None,
+                    })
+                    .collect();
                 let cached = take_available_source_cached_matches(
                     cached,
                     (!current_origin.trim().is_empty()).then_some(current_origin.as_str()),
@@ -3029,9 +3092,24 @@ pub async fn get_available_book_source_sse(
         };
 
         if !has_more && last_index_start < 0 {
+            let candidates: Vec<_> = all_results
+                .iter()
+                .map(|b| db::repo::BookSourceCandidate {
+                    name: b.name.clone(),
+                    author: b.author.clone(),
+                    book_url: b.book_url.clone(),
+                    origin: b.origin.clone(),
+                    cover_url: b.cover_url.clone(),
+                    intro: b.intro.clone(),
+                    kind: b.kind.clone(),
+                    latest_chapter_title: b.last_chapter.clone(),
+                    update_time: b.update_time,
+                    word_count: b.word_count,
+                })
+                .collect();
             let _ = state_clone
-                .book_service
-                .save_book_sources_cache(&user_ns, &book.book_url, &all_results)
+                .book_source_candidate_repo
+                .upsert_candidates(&user_ns, &book.book_url, &candidates)
                 .await;
         }
 
