@@ -149,14 +149,37 @@ const candidatePreview = ref<Book | null>(null)
 const AVAILABLE_CONCURRENT_COUNT = 8
 let availableSourceSSE: EventSource | null = null
 
-// Per-bookUrl persistent cache for available sources
-const sourceCache = new Map<string, {
+// Per-bookUrl persistent cache — survives component remount via localStorage
+const CACHE_KEY = 'reader_source_cache'
+const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
+
+type CacheEntry = {
   results: SearchBook[]
   lastIndex: number
   hasMoreSources: boolean
   ts: number
-}>()
-const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
+}
+
+function loadCache(): Map<string, CacheEntry> {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY)
+    if (!raw) return new Map()
+    const parsed = JSON.parse(raw) as [string, CacheEntry][]
+    return new Map(parsed)
+  } catch {
+    return new Map()
+  }
+}
+
+function saveCache(cache: Map<string, CacheEntry>) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify([...cache]))
+  } catch {
+    // storage full or unavailable — silently ignore
+  }
+}
+
+let sourceCache: Map<string, CacheEntry> = loadCache()
 
 const currentSource = computed(() => {
   if (!store.book) return null
@@ -251,6 +274,7 @@ function persistToCache() {
     hasMoreSources: hasMoreSources.value,
     ts: Date.now(),
   })
+  saveCache(sourceCache)
 }
 
 onUnmounted(() => {
