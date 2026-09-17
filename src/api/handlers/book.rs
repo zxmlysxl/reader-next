@@ -21,6 +21,7 @@ use axum::{
     extract::{Multipart, Query, State},
     Json,
 };
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -333,7 +334,9 @@ pub async fn search_book_multi(
     };
 
     let concurrent_count = req.concurrent_count.unwrap_or(DEFAULT_SEARCH_CONCURRENT_COUNT).max(1) as usize;
-    let mut set: JoinSet<Result<Result<Vec<crate::model::search::SearchBook>>, AppError>> = JoinSet::new();
+    // spawn + timeout: join_handle wraps Result<T, E>, timeout wraps that -> Result<Result<T, E>, Elapsed>
+    type SearchOut = Result<Vec<crate::model::search::SearchBook>, AppError>;
+    let mut set: JoinSet<tokio::time::error::Elapsed> = JoinSet::new();
     let mut idx = 0usize;
 
     // Kick off the first batch
