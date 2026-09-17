@@ -16,6 +16,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
+    cargo clean && \
     cargo build --release --locked \
     && cp /app/target/release/reader-next /app/reader-next
 
