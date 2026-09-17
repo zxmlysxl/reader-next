@@ -148,6 +148,7 @@ const selectedCandidate = ref<CandidateItem | null>(null)
 const candidatePreview = ref<Book | null>(null)
 const AVAILABLE_CONCURRENT_COUNT = 8
 let availableSourceSSE: EventSource | null = null
+let lastSeenBookUrl: string | null = null
 
 // Per-bookUrl persistent cache — survives component remount via localStorage
 const CACHE_KEY = 'reader_source_cache'
@@ -222,39 +223,54 @@ const preparedResults = computed<CandidateItem[]>(() => {
 
 watch(() => store.book?.bookUrl, (newUrl) => {
   if (!newUrl) return
-  // Book changed: restore from cache or start fresh
-  const cached = sourceCache.get(newUrl)
-  if (cached && Date.now() - cached.ts <= CACHE_TTL) {
-    results.value = cached.results
-    lastIndex.value = cached.lastIndex
-    hasMoreSources.value = cached.hasMoreSources
-    selectedCandidate.value = null
-    candidatePreview.value = null
-    if (preparedResults.value.length) {
-      searching.value = false
-      void selectCandidate(preparedResults.value[0])
+  const isNewBook = lastSeenBookUrl !== null && lastSeenBookUrl !== newUrl
+  lastSeenBookUrl = newUrl
+  if (isNewBook) {
+    // Different book: restore from cache or start fresh
+    const cached = sourceCache.get(newUrl)
+    if (cached && Date.now() - cached.ts <= CACHE_TTL) {
+      results.value = cached.results
+      lastIndex.value = cached.lastIndex
+      hasMoreSources.value = cached.hasMoreSources
+      selectedCandidate.value = null
+      candidatePreview.value = null
+      if (preparedResults.value.length) {
+        searching.value = false
+        void selectCandidate(preparedResults.value[0])
+      }
+    } else {
+      startSearch()
     }
-  } else {
-    startSearch()
   }
+  // Same book (different origin): keep existing results —
+  // the new origin will show as "current source" at the top
+  // and the full results list stays available for the user.
 }, { immediate: false })
 
 onMounted(() => {
   if (!store.book) return
-  const cached = sourceCache.get(store.book.bookUrl)
-  if (!cached || Date.now() - cached.ts > CACHE_TTL) {
-    startSearch()
-  } else {
-    results.value = cached.results
-    lastIndex.value = cached.lastIndex
-    hasMoreSources.value = cached.hasMoreSources
-    selectedCandidate.value = null
-    candidatePreview.value = null
-    if (preparedResults.value.length) {
-      searching.value = false
-      void selectCandidate(preparedResults.value[0])
+  const currentBookUrl = store.book.bookUrl
+  const isFirstMount = lastSeenBookUrl === null
+  const isNewBook = !isFirstMount && lastSeenBookUrl !== currentBookUrl
+  lastSeenBookUrl = currentBookUrl
+  if (isFirstMount || isNewBook) {
+    // First mount or different book: restore from cache or start fresh
+    const cached = sourceCache.get(currentBookUrl)
+    if (!cached || Date.now() - cached.ts > CACHE_TTL) {
+      startSearch()
+    } else {
+      results.value = cached.results
+      lastIndex.value = cached.lastIndex
+      hasMoreSources.value = cached.hasMoreSources
+      selectedCandidate.value = null
+      candidatePreview.value = null
+      if (preparedResults.value.length) {
+        searching.value = false
+        void selectCandidate(preparedResults.value[0])
+      }
     }
   }
+  // Same book (different origin after source switch): keep existing results
 })
 
 
