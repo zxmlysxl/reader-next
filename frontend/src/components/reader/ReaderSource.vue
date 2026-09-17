@@ -120,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useReaderStore } from '../../stores/reader'
 import { useAppStore } from '../../stores/app'
 import { getAvailableBookSourceSSE } from '../../api/search'
@@ -197,6 +197,24 @@ const preparedResults = computed<CandidateItem[]>(() => {
     .sort((a, b) => b.score - a.score)
 })
 
+watch(() => store.book?.bookUrl, (newUrl, oldUrl) => {
+  if (!newUrl || newUrl === oldUrl) return
+  // Book changed: restore from cache or start fresh
+  const cached = sourceCache.get(newUrl)
+  if (cached && Date.now() - cached.ts <= CACHE_TTL) {
+    results.value = cached.results
+    lastIndex.value = cached.lastIndex
+    hasMoreSources.value = cached.hasMoreSources
+    selectedCandidate.value = null
+    candidatePreview.value = null
+    if (preparedResults.value.length) {
+      void selectCandidate(preparedResults.value[0])
+    }
+  } else {
+    startSearch()
+  }
+}, { immediate: false })
+
 onMounted(() => {
   hydrateFromCache()
   if (!store.book) return
@@ -207,7 +225,9 @@ onMounted(() => {
     results.value = cached.results
     lastIndex.value = cached.lastIndex
     hasMoreSources.value = cached.hasMoreSources
-    if (selectedCandidate.value == null && preparedResults.value.length) {
+    selectedCandidate.value = null
+    candidatePreview.value = null
+    if (preparedResults.value.length) {
       void selectCandidate(preparedResults.value[0])
     }
   }
