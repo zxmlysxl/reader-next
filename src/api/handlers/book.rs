@@ -21,7 +21,6 @@ use axum::{
     extract::{Multipart, Query, State},
     Json,
 };
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -334,32 +333,27 @@ pub async fn search_book_multi(
     };
 
     let concurrent_count = req.concurrent_count.unwrap_or(DEFAULT_SEARCH_CONCURRENT_COUNT).max(1) as usize;
-    let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
+    let mut set: JoinSet<Result<Result<Vec<crate::model::search::SearchBook>>, AppError>> = JoinSet::new();
     let mut idx = 0usize;
 
-    // Helper closure to build a timeout-wrapped spawn
-    let spawn_one = |svc: _, user_ns: _, source: _, k: _, page: _| {
-        tokio::spawn(async move {
-            timeout(
-                Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
-                svc.search_book(&user_ns, &source, &k, page),
-            )
-            .await
-        })
-    };
-
     // Kick off the first batch
-    while tasks.len() < concurrent_count && idx < sources.len() {
+    while set.len() < concurrent_count && idx < sources.len() {
         let svc = state.book_service.clone();
         let user_ns = user_ns.clone();
         let source = sources[idx].clone();
-        tasks.push(spawn_one(svc, user_ns, source, key.clone(), page));
+        set.spawn(async move {
+            timeout(
+                Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
+                svc.search_book(&user_ns, &source, &key.clone(), page),
+            )
+            .await
+        });
         idx += 1;
     }
 
     let mut results: Vec<crate::model::search::SearchBook> = Vec::new();
 
-    while let Some(res) = tasks.next().await {
+    while let Some(res) = set.join_next().await {
         match res {
             Ok(Ok(Ok(list))) => results.extend(list),
             Ok(Ok(Err(e))) => {
@@ -376,7 +370,13 @@ pub async fn search_book_multi(
             let svc = state.book_service.clone();
             let user_ns = user_ns.clone();
             let source = sources[idx].clone();
-            tasks.push(spawn_one(svc, user_ns, source, key.clone(), page));
+            set.spawn(async move {
+                timeout(
+                    Duration::from_secs(SEARCH_SOURCE_TIMEOUT_SECS),
+                    svc.search_book(&user_ns, &source, &key.clone(), page),
+                )
+                .await
+            });
             idx += 1;
         }
     }
