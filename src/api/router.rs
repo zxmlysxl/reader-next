@@ -188,8 +188,11 @@ pub fn build_router(state: AppState) -> Router {
             get(handlers::get_available_book_source).post(handlers::get_available_book_source),
         )
         .route(
-            "/reader3/getAvailableBookSourceSSE",
+            "/reader3/getAvailableBookSources",
             get(handlers::get_available_book_sources),
+        )
+        .route(
+            "/reader3/getAvailableBookSourceSSE",
             get(handlers::get_available_book_source_sse),
         )
         .route(
