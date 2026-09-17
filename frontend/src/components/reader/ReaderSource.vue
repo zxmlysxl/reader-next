@@ -231,6 +231,7 @@ watch(() => store.book?.bookUrl, (newUrl, oldUrl) => {
     selectedCandidate.value = null
     candidatePreview.value = null
     if (preparedResults.value.length) {
+    searching.value = false
       void selectCandidate(preparedResults.value[0])
     }
   } else {
@@ -251,6 +252,7 @@ onMounted(() => {
     selectedCandidate.value = null
     candidatePreview.value = null
     if (preparedResults.value.length) {
+    searching.value = false
       void selectCandidate(preparedResults.value[0])
     }
   }
@@ -263,6 +265,7 @@ function hydrateFromCache() {
     results.value = cached.results
     lastIndex.value = cached.lastIndex
     hasMoreSources.value = cached.hasMoreSources
+    searching.value = false
   }
 }
 
