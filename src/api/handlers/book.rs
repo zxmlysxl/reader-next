@@ -2623,8 +2623,8 @@ pub async fn search_book_source_sse(
                     intro: b.intro.clone(),
                     kind: b.kind.clone(),
                     latest_chapter_title: b.last_chapter.clone(),
-                    update_time: b.update_time,
-                    word_count: b.word_count,
+                    update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                    word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
                 })
                 .collect();
             let _ = state_clone
@@ -2814,8 +2814,8 @@ pub async fn get_available_book_source(
                 intro: b.intro.clone(),
                 kind: b.kind.clone(),
                 latest_chapter_title: b.last_chapter.clone(),
-                update_time: b.update_time,
-                word_count: b.word_count,
+                update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
             })
             .collect();
         let _ = state
@@ -2870,8 +2870,8 @@ pub async fn get_available_book_sources(
             intro: b.intro,
             kind: b.kind,
             last_chapter: b.latest_chapter_title,
-            update_time: b.update_time,
-            word_count: b.word_count,
+            update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+            word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
             book_source_urls: None,
         })
         .collect();
@@ -3103,8 +3103,8 @@ pub async fn get_available_book_source_sse(
                     intro: b.intro.clone(),
                     kind: b.kind.clone(),
                     latest_chapter_title: b.last_chapter.clone(),
-                    update_time: b.update_time,
-                    word_count: b.word_count,
+                    update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                    word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
                 })
                 .collect();
             let _ = state_clone
