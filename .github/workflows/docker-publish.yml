@@ -64,6 +64,7 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          no-cache-fallback: true
 
       - name: Export digest
         run: |
