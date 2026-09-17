@@ -40,7 +40,7 @@ const SEARCH_SOURCE_TIMEOUT_SECS: u64 = 10;
 /// Default concurrent search count (lowered from 24 to reduce network pressure).
 const DEFAULT_SEARCH_CONCURRENT_COUNT: i32 = 10;
 const MAX_AVAILABLE_CONCURRENT_COUNT: usize = 20;
-const AVAILABLE_SOURCE_SSE_RESULT_LIMIT: usize = 20;
+const AVAILABLE_SOURCE_SSE_RESULT_LIMIT: usize = 5;
 const DEFAULT_GLOBAL_EXPLORE_LIMIT: usize = 20;
 const MAX_GLOBAL_EXPLORE_LIMIT: usize = 100;
 const DEFAULT_GLOBAL_EXPLORE_CONCURRENT: usize = 16;
