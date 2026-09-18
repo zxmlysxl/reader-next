@@ -27,7 +27,6 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::convert::Infallible;
-use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
@@ -2827,6 +2826,8 @@ pub async fn get_available_book_source(
             .await;
     }
 
+    let has_more = cursor < sources.len();
+
     if paged_request {
         let response =
             build_available_book_source_response(result, last_index, has_more, req.result_limit);
@@ -2924,7 +2925,7 @@ pub async fn get_available_book_source_sse(
 
     if !refresh && last_index_start < 0 {
         if let Some(ref url) = book_url {
-            if let Ok(candidates) = state
+            let candidates_to_use = if let Ok(candidates) = state
                 .book_source_candidate_repo
                 .get_candidates(&user_ns, url)
                 .await
@@ -2933,7 +2934,7 @@ pub async fn get_available_book_source_sse(
             } else {
                 Vec::new()
             };
-            if !candidates.is_empty() {
+            if !candidates_to_use.is_empty() {
                 let current_origin = book.origin.clone();
                 let cached: Vec<SearchBook> = candidates
                     .into_iter()
