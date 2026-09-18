@@ -123,7 +123,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useReaderStore } from '../../stores/reader'
 import { useAppStore } from '../../stores/app'
-import { getAvailableBookSourceSSE } from '../../api/search'
+import { getAvailableBookSourceSSE, getAvailableBookSource } from '../../api/search'
 import { getBookInfo } from '../../api/bookshelf'
 import type { Book, SearchBook } from '../../types'
 
@@ -240,19 +240,50 @@ const preparedResults = computed<CandidateItem[]>(() => {
     .sort((a, b) => b.score - a.score)
 })
 
-onMounted(() => {
-  const cached = loadCachedResults()
-  if (cached.length > 0) {
-    results.value = cached
-    const sel = loadCachedSelected()
-    if (sel) {
-      selectedCandidate.value = sel
-      // restore candidatePreview to null so it re-fetches
-      void selectCandidate(sel)
-    } else if (preparedResults.value.length) {
-      void selectCandidate(preparedResults.value[0])
+onMounted(async () => {
+  // 1. Try server DB first — this is the permanent source of truth
+  if (store.book) {
+    try {
+      const fromDb = await getAvailableBookSource({
+        url: store.book.bookUrl,
+        name: store.book.name,
+        author: store.book.author,
+        origin: store.book.origin,
+        refresh: 0,
+        lastIndex: -1,
+        resultLimit: 50,
+        concurrentCount: AVAILABLE_CONCURRENT_COUNT,
+      })
+      if (fromDb.length > 0) {
+        // Merge DB results into local state (avoid duplicates with current origin)
+        mergeCandidates(fromDb)
+        saveCachedResults()
+        if (!selectedCandidate.value && preparedResults.value.length) {
+          void selectCandidate(preparedResults.value[0])
+        }
+      }
+    } catch {
+      // fallback to localStorage
     }
-  } else {
+  }
+
+  // 2. If DB gave nothing, fall back to localStorage cache
+  if (results.value.length === 0) {
+    const cached = loadCachedResults()
+    if (cached.length > 0) {
+      results.value = cached
+      const sel = loadCachedSelected()
+      if (sel) {
+        selectedCandidate.value = sel
+        void selectCandidate(sel)
+      } else if (preparedResults.value.length) {
+        void selectCandidate(preparedResults.value[0])
+      }
+    }
+  }
+
+  // 3. If still nothing, trigger a fresh search
+  if (results.value.length === 0) {
     startSearch()
   }
 })

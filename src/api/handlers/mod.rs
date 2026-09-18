@@ -7,6 +7,7 @@ mod book_source;
 mod bookmark;
 mod chapter_summary;
 mod replace_rule;
+mod remote_subscription;
 mod rss;
 mod update;
 mod user;

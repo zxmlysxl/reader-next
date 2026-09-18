@@ -227,6 +227,13 @@ pub fn build_router(state: AppState) -> Router {
             "/reader3/getRssContent",
             get(handlers::get_rss_content).post(handlers::get_rss_content),
         )
+        .route("/reader3/remoteSubscriptions", get(handlers::list_remote_subscriptions))
+        .route("/reader3/remoteSubscriptions", post(handlers::add_remote_subscription))
+        .route("/reader3/removeRemoteSubscription", post(handlers::remove_remote_subscription))
+        .route(
+            "/reader3/updateRemoteSubscriptionSynced",
+            post(handlers::update_remote_subscription_synced),
+        )
         .route("/reader3/getBookmarks", get(handlers::get_bookmarks))
         .route("/reader3/saveBookmark", post(handlers::save_bookmark))
         .route("/reader3/saveBookmarks", post(handlers::save_bookmarks))

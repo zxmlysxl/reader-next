@@ -82,3 +82,24 @@ export function readSourceFile(file: File) {
 export function getInvalidBookSources() {
   return http.post<unknown[]>('/getInvalidBookSources').then((r) => r.data)
 }
+
+export type SourceSubscription = {
+  url: string
+  lastSyncedAt?: number
+}
+
+export function listRemoteSubscriptions() {
+  return http.get<SourceSubscription[]>('/remoteSubscriptions').then((r) => r.data)
+}
+
+export function addRemoteSubscription(url: string) {
+  return http.post<{ saved: boolean }>('/remoteSubscriptions', { url }).then((r) => r.data)
+}
+
+export function removeRemoteSubscription(url: string) {
+  return http.post<{ deleted: boolean }>('/removeRemoteSubscription', { url }).then((r) => r.data)
+}
+
+export function updateRemoteSubscriptionSynced(url: string) {
+  return http.post<{ updated: boolean }>('/updateRemoteSubscriptionSynced', { url }).then((r) => r.data)
+}

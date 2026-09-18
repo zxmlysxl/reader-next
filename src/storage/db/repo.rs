@@ -221,6 +221,101 @@ impl BookRepo {
     }
 }
 
+// ── RemoteSubscriptionRepo ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RemoteSubscription {
+    pub id: Option<i64>,
+    pub user_ns: String,
+    pub url: String,
+    pub last_synced_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub struct RemoteSubscriptionRepo {
+    pool: SqlitePool,
+}
+
+impl RemoteSubscriptionRepo {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn upsert(&self, user_ns: &str, url: &str) -> Result<(), AppError> {
+        let now = now_ts();
+        sqlx::query(
+            "INSERT INTO remote_subscriptions (user_ns, url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(user_ns, url) DO UPDATE SET updated_at=excluded.updated_at",
+        )
+        .bind(user_ns)
+        .bind(url)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list(&self, user_ns: &str) -> Result<Vec<RemoteSubscription>, AppError> {
+        let rows = sqlx::query_as::<_, RemoteSubscriptionRow>(
+            "SELECT id, user_ns, url, last_synced_at, created_at, updated_at \
+             FROM remote_subscriptions WHERE user_ns=?1 ORDER BY updated_at DESC",
+        )
+        .bind(user_ns)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn delete(&self, user_ns: &str, url: &str) -> Result<bool, AppError> {
+        let result = sqlx::query(
+            "DELETE FROM remote_subscriptions WHERE user_ns=?1 AND url=?2",
+        )
+        .bind(user_ns)
+        .bind(url)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn update_last_synced(&self, user_ns: &str, url: &str) -> Result<(), AppError> {
+        let now = now_ts();
+        sqlx::query(
+            "UPDATE remote_subscriptions SET last_synced_at=?3, updated_at=?3 WHERE user_ns=?1 AND url=?2",
+        )
+        .bind(user_ns)
+        .bind(url)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RemoteSubscriptionRow {
+    id: Option<i64>,
+    user_ns: String,
+    url: String,
+    last_synced_at: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+impl From<RemoteSubscriptionRow> for RemoteSubscription {
+    fn from(r: RemoteSubscriptionRow) -> Self {
+        Self {
+            id: r.id,
+            user_ns: r.user_ns,
+            url: r.url,
+            last_synced_at: r.last_synced_at,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
 // ── BookSourceCandidateRepo ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

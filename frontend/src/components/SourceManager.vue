@@ -129,6 +129,10 @@ import {
   testBookSources,
   readRemoteSourceFile,
   readSourceFile,
+  listRemoteSubscriptions,
+  addRemoteSubscription,
+  removeRemoteSubscription,
+  updateRemoteSubscriptionSynced,
 } from '../api/source'
 import { useAppStore } from '../stores/app'
 import { useSourceStore } from '../stores/source'
@@ -149,12 +153,7 @@ import SourceManagerHeader from './source-manager/SourceManagerHeader.vue'
 import SourceSubscriptionPanel from './source-manager/SourceSubscriptionPanel.vue'
 import { storeToRefs } from 'pinia'
 
-type SourceSubscription = {
-  url: string
-  lastSyncedAt?: number
-}
 
-const SUBSCRIPTION_KEY = 'reader-source-subscriptions'
 
 const props = defineProps<{
   modelValue: boolean
@@ -176,7 +175,8 @@ const selectedSourceUrls = ref(new Set<string>())
 
 const subscriptionPanelVisible = ref(false)
 const remoteUrl = ref('')
-const subscriptions = ref<SourceSubscription[]>(loadSubscriptions())
+const subscriptions = ref<SourceSubscription[]>([])
+let subscriptionsLoaded = false
 
 const editingSource = ref<BookSource | null>(null)
 const editorText = ref(JSON.stringify(createEmptySource(), null, 2))
@@ -227,17 +227,14 @@ function createEmptySource(): BookSource {
   }
 }
 
-function loadSubscriptions(): SourceSubscription[] {
+async function loadSubscriptions() {
   try {
-    const raw = localStorage.getItem(SUBSCRIPTION_KEY)
-    return raw ? JSON.parse(raw) : []
+    const list = await listRemoteSubscriptions()
+    subscriptions.value = list
+    subscriptionsLoaded = true
   } catch {
-    return []
+    // fallback to empty
   }
-}
-
-function persistSubscriptions() {
-  localStorage.setItem(SUBSCRIPTION_KEY, JSON.stringify(subscriptions.value))
 }
 
 async function loadSources(force = true) {
@@ -534,15 +531,19 @@ async function importRemoteSource() {
   }
 }
 
-function saveSubscription() {
+async function saveSubscription() {
   if (!remoteUrl.value) {
     appStore.showToast('请输入远程书源链接', 'warning')
     return
   }
   if (!subscriptions.value.find((item) => item.url === remoteUrl.value)) {
-    subscriptions.value.unshift({ url: remoteUrl.value })
-    persistSubscriptions()
-    appStore.showToast('订阅已保存', 'success')
+    try {
+      await addRemoteSubscription(remoteUrl.value)
+      subscriptions.value.unshift({ url: remoteUrl.value })
+      appStore.showToast('订阅已保存', 'success')
+    } catch (e: unknown) {
+      appStore.showToast((e as Error).message || '保存订阅失败', 'error')
+    }
   }
 }
 
@@ -551,19 +552,27 @@ async function syncSubscription(url: string) {
   await importRemoteSource()
 }
 
-function removeSubscription(url: string) {
-  subscriptions.value = subscriptions.value.filter((item) => item.url !== url)
-  persistSubscriptions()
+async function removeSubscription(url: string) {
+  try {
+    await removeRemoteSubscription(url)
+    subscriptions.value = subscriptions.value.filter((item) => item.url !== url)
+  } catch (e: unknown) {
+    appStore.showToast((e as Error).message || '删除订阅失败', 'error')
+  }
 }
 
-function touchSubscription(url: string) {
-  const existing = subscriptions.value.find((item) => item.url === url)
-  if (existing) {
-    existing.lastSyncedAt = Date.now()
-  } else {
-    subscriptions.value.unshift({ url, lastSyncedAt: Date.now() })
+async function touchSubscription(url: string) {
+  try {
+    await updateRemoteSubscriptionSynced(url)
+    const existing = subscriptions.value.find((item) => item.url === url)
+    if (existing) {
+      existing.lastSyncedAt = Date.now()
+    } else {
+      subscriptions.value.unshift({ url, lastSyncedAt: Date.now() })
+    }
+  } catch {
+    // ignore silently
   }
-  persistSubscriptions()
 }
 
 function exportSources() {
@@ -593,6 +602,9 @@ watch(() => props.modelValue, (v) => {
     }
     if (!editingSource.value && !editorText.value.trim()) {
       createSource()
+    }
+    if (!subscriptionsLoaded) {
+      loadSubscriptions()
     }
   }
 }, { immediate: true })

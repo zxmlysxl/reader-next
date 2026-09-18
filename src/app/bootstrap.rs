@@ -39,6 +39,7 @@ pub async fn run() -> anyhow::Result<()> {
     let book_source_repo = db::repo::BookSourceRepo::new(pool.clone());
     let book_repo = db::repo::BookRepo::new(pool.clone());
     let book_source_candidate_repo = db::repo::BookSourceCandidateRepo::new(pool.clone());
+    let remote_subscription_repo = db::repo::RemoteSubscriptionRepo::new(pool.clone());
 
     let http = HttpClient::new(cfg.request_timeout_secs, None)?;
     println!("DEBUG: http client created");
@@ -82,6 +83,7 @@ pub async fn run() -> anyhow::Result<()> {
         book_service,
         book_source_service,
         book_source_candidate_repo,
+        remote_subscription_repo,
         user_service,
         book_group_service,
         local_txt_book_service,
