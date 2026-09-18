@@ -224,7 +224,6 @@ impl BookRepo {
 // ── RemoteSubscriptionRepo ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[derive(Clone)]
 pub struct RemoteSubscriptionRepo {
     pool: SqlitePool,
 }
