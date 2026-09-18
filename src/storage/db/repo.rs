@@ -286,20 +286,6 @@ impl RemoteSubscriptionRepo {
 }
 
 
-
-impl From<RemoteSubscriptionRow> for RemoteSubscription {
-    fn from(r: RemoteSubscriptionRow) -> Self {
-        Self {
-            id: r.id,
-            user_ns: r.user_ns,
-            url: r.url,
-            last_synced_at: r.last_synced_at,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-        }
-    }
-}
-
 // ── BookSourceCandidateRepo ──────────────────────────────────────────────────
 
 pub struct BookSourceCandidate {
