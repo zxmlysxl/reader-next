@@ -239,7 +239,7 @@ const preparedResults = computed<CandidateItem[]>(() => {
     })
     .sort((a, b) => b.score - a.score)
 })
-
+onMounted(async () => {
   // 1. Try server DB first — this is the permanent source of truth
   if (store.book) {
     try {
@@ -295,6 +295,7 @@ const preparedResults = computed<CandidateItem[]>(() => {
 onUnmounted(() => {
   closeAvailableSourceSSE()
 })
+
 
 function startSearch() {
   if (!store.book) return
