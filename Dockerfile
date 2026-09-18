@@ -14,7 +14,7 @@ RUN apt-get -o Acquire::Retries=3 update \
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --release --locked \
+RUN cargo build --release \
     && cp /app/target/release/reader-next /app/reader-next
 
 FROM debian:bookworm-slim AS runtime
