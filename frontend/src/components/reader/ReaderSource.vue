@@ -163,12 +163,14 @@ function loadCachedResults(): SearchBook[] {
     if (raw) {
       const cached = JSON.parse(raw) as { results: SearchBook[]; lastIndex: number; hasMore: boolean }
       if (Array.isArray(cached.results) && cached.results.length > 0) {
+        console.log('[RS] loadCachedResults: found', cached.results.length, 'items')
         lastIndex.value = cached.lastIndex ?? -1
         hasMoreSources.value = cached.hasMore ?? true
         return cached.results
       }
     }
   } catch { /* ignore */ }
+  console.log('[RS] loadCachedResults: no cache')
   return []
 }
 
@@ -240,10 +242,11 @@ const preparedResults = computed<CandidateItem[]>(() => {
     .sort((a, b) => b.score - a.score)
 })
 
-onMounted(async () => {
+onMounted(async () => { console.log("[RS] onMounted")
   // 1. Try server DB first — this is the permanent source of truth
   if (store.book) {
     try {
+      console.log('[RS] calling getAvailableBookSource API...'),
       const raw = await getAvailableBookSource({
         url: store.book.bookUrl,
         name: store.book.name,
@@ -257,6 +260,7 @@ onMounted(async () => {
       // normalizeAvailableBookSourceResult returns SearchBook[] for array result,
       // or AvailableBookSourceResult { books, lastIndex, hasMore } for object result
       const fromDb = Array.isArray(raw) ? raw : raw.books
+      console.log('[RS] getAvailableBookSource returned', fromDb?.length, 'items')
       if (fromDb.length > 0) {
         // Merge DB results into local state (avoid duplicates with current origin)
         mergeCandidates(fromDb)
@@ -266,6 +270,7 @@ onMounted(async () => {
         }
       }
     } catch (err) {
+      console.warn('[RS] getAvailableBookSource failed:', err?.message || err)
       if (store.book) {
         localStorage.removeItem(cacheKey(store.book.bookUrl, store.book.origin))
       }
@@ -354,6 +359,7 @@ function parseAvailableSourcePayload(event: MessageEvent): AvailableSourceSSEPay
 }
 
 function applyAvailableSourcePayload(payload: AvailableSourceSSEPayload | null) {
+  console.log('[RS] applyAvailableSourcePayload: lastIndex=', payload?.lastIndex, 'incoming=', Array.isArray(payload?.data) ? payload.data.length : Array.isArray(payload?.books) ? payload.books.length : '?')
   if (!payload) return
   const incoming = Array.isArray(payload.data)
     ? payload.data
