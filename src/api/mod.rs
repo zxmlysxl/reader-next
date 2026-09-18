@@ -21,7 +21,6 @@ pub struct AppState {
     pub config: AppConfig,
     pub book_service: Arc<BookService>,
     pub book_source_service: Arc<BookSourceService>,
-<<<<<<< HEAD
     pub book_source_candidate_repo: db::repo::BookSourceCandidateRepo,
     pub remote_subscription_repo: db::repo::RemoteSubscriptionRepo,
     pub user_service: Arc<UserService>,
