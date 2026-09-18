@@ -3,6 +3,7 @@ pub mod handlers;
 pub mod router;
 
 use crate::app::config::AppConfig;
+use crate::storage::db::repo;
 use crate::service::{
     ai_book_catchup_service::AiBookCatchupService,
     ai_book_generation_service::AiBookGenerationService, ai_book_service::AiBookService,
@@ -20,7 +21,7 @@ pub struct AppState {
     pub config: AppConfig,
     pub book_service: Arc<BookService>,
     pub book_source_service: Arc<BookSourceService>,
-    pub book_source_candidate_repo: db::repo::BookSourceCandidateRepo,
+    pub book_source_candidate_repo: repo::BookSourceCandidateRepo,
     pub user_service: Arc<UserService>,
     pub book_group_service: Arc<BookGroupService>,
     pub local_txt_book_service: Arc<LocalTxtBookService>,
