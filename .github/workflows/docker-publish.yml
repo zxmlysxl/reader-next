@@ -55,7 +55,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
 
-      - name: Build image
+      - name: Build and push digest
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -63,17 +63,11 @@ jobs:
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=false
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           no-cache: true
         env:
           CARGO_NET_OFFLINE: "false"
           CARGO_INCREMENTAL: "0"
-
-      - name: Push digest (only on success)
-        if: success()
-        run: |
-          digest="${{ steps.build.outputs.digest }}"
-          docker push "${{ env.IMAGE_NAME }}@${digest}"
 
       - name: Export digest
         run: |
