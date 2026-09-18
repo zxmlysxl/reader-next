@@ -247,6 +247,7 @@ onMounted(async () => {
   // 1. Try server DB first — this is the permanent source of truth
   if (store.book) {
     try {
+      console.log("[ReaderSource] calling getAvailableBookSource API...")
       const raw = await getAvailableBookSource({
         url: store.book.bookUrl,
         name: store.book.name,
@@ -260,6 +261,7 @@ onMounted(async () => {
       // normalizeAvailableBookSourceResult returns SearchBook[] for array result,
       // or AvailableBookSourceResult { books, lastIndex, hasMore } for object result
       const fromDb = Array.isArray(raw) ? raw : raw.books
+      console.log("[ReaderSource] getAvailableBookSource returned:", fromDb.length, "items, raw type:", Array.isArray(raw) ? "array" : "object")
       if (fromDb.length > 0) {
         // Merge DB results into local state (avoid duplicates with current origin)
         mergeCandidates(fromDb)
@@ -268,7 +270,8 @@ onMounted(async () => {
           void selectCandidate(preparedResults.value[0])
         }
       }
-    } catch {
+    } catch (err) {
+      console.error("[ReaderSource] getAvailableBookSource failed:", err?.message || err
       // fallback to localStorage
     }
   }
@@ -368,6 +371,7 @@ function applyAvailableSourcePayload(payload: AvailableSourceSSEPayload | null) 
     hasMoreSources.value = payload.hasMore
   }
   console.log("[ReaderSource] applyAvailableSourcePayload: incoming.length=", incoming.length, "results.length=", results.value.length)
+  console.log("[ReaderSource] applyAvailableSourcePayload: hasMore=", payload.hasMore, "lastIndex=", payload.lastIndex)
   mergeCandidates(incoming)
   // Only persist if we received actual new data; avoid overwriting
   // existing cached results when fallback search returns 0 matches.
