@@ -297,8 +297,8 @@ pub struct BookSourceCandidate {
     pub intro: Option<String>,
     pub kind: Option<String>,
     pub latest_chapter_title: Option<String>,
-    pub update_time: Option<String>,
-    pub word_count: Option<String>,
+    pub update_time: Option<i64>,
+    pub word_count: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -392,8 +392,8 @@ struct BookSourceCandidateRow {
     intro: Option<String>,
     kind: Option<String>,
     latest_chapter_title: Option<String>,
-    update_time: Option<String>,
-    word_count: Option<String>,
+    update_time: Option<i64>,
+    word_count: Option<i64>,
 }
 
 impl From<BookSourceCandidateRow> for BookSourceCandidate {

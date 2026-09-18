@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSubscription {
     pub id: Option<i64>,
+    #[sqlx(rename = "user_ns")]
     #[serde(skip)]
     pub user_namespace: Option<String>,
     pub url: String,
