@@ -27,8 +27,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::convert::Infallible;
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
@@ -2934,9 +2933,9 @@ pub async fn get_available_book_source_sse(
             } else {
                 Vec::new()
             };
-            if !candidates_to_use.is_empty() {
+            if !candidates.is_empty() {
                 let current_origin = book.origin.clone();
-                let cached: Vec<SearchBook> = candidates_to_use
+                let cached: Vec<SearchBook> = candidates
                     .into_iter()
                     .map(|c| SearchBook {
                         name: c.name,
