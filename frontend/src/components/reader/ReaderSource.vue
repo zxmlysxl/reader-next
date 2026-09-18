@@ -364,6 +364,7 @@ function applyAvailableSourcePayload(payload: AvailableSourceSSEPayload | null) 
     hasMoreSources.value = payload.hasMore
   }
   mergeCandidates(incoming)
+  saveCachedResults()
 
   if (!selectedCandidate.value && preparedResults.value.length) {
     void selectCandidate(preparedResults.value[0])
