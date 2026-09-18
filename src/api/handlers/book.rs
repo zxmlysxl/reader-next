@@ -2936,7 +2936,7 @@ pub async fn get_available_book_source_sse(
             };
             if !candidates_to_use.is_empty() {
                 let current_origin = book.origin.clone();
-                let cached: Vec<SearchBook> = candidates
+                let cached: Vec<SearchBook> = candidates_to_use
                     .into_iter()
                     .map(|c| SearchBook {
                         name: c.name,
