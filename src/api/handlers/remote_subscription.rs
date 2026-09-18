@@ -2,6 +2,7 @@ use crate::api::auth::AuthContext;
 use crate::api::AppState;
 use crate::error::error::{ApiResponse, AppError};
 use crate::model::remote_subscription::RemoteSubscription;
+use axum::extract::State;
 use axum::Json;
 use serde::Deserialize;
 
