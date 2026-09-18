@@ -2524,7 +2524,24 @@ async fn save_candidates_to_file(
         return;
     }
     let path = candidate_file_path(storage_dir, user_ns, book_name, book_author);
-    let json = match serde_json::to_string(candidates) {
+    // Convert to SearchBook (has serde derives) for JSON serialization
+    let as_search_books: Vec<crate::model::search::SearchBook> = candidates
+        .iter()
+        .map(|c| crate::model::search::SearchBook {
+            name: c.name.clone(),
+            author: c.author.clone(),
+            book_url: c.book_url.clone(),
+            origin: c.origin.clone(),
+            cover_url: c.cover_url.clone(),
+            intro: c.intro.clone(),
+            kind: c.kind.clone(),
+            last_chapter: c.latest_chapter_title.clone(),
+            update_time: c.update_time.map(|v| v.to_string()),
+            word_count: c.word_count.map(|v| v.to_string()),
+            book_source_urls: None,
+        })
+        .collect();
+    let json = match serde_json::to_string(&as_search_books) {
         Ok(j) => j,
         Err(e) => {
             tracing::warn!("failed to serialize candidates: {}", e);
@@ -2558,7 +2575,26 @@ async fn load_candidates_from_file(
     if file.read_to_string(&mut contents).await.is_err() {
         return None;
     }
-    serde_json::from_str(&contents).ok()
+    // Deserialize as SearchBook (has serde), then convert back to BookSourceCandidate
+    let search_books: Vec<crate::model::search::SearchBook> = match serde_json::from_str(&contents) {
+        Ok(books) => books,
+        Err(_) => return None,
+    };
+    Some(search_books
+        .into_iter()
+        .map(|b| db::repo::BookSourceCandidate {
+            name: b.name,
+            author: b.author,
+            book_url: b.book_url,
+            origin: b.origin,
+            cover_url: b.cover_url,
+            intro: b.intro,
+            kind: b.kind,
+            latest_chapter_title: b.last_chapter,
+            update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+            word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
+        })
+        .collect())
 }
 
 pub async fn search_book_source_sse(
