@@ -133,6 +133,7 @@ import {
   addRemoteSubscription,
   removeRemoteSubscription,
   updateRemoteSubscriptionSynced,
+  type SourceSubscription,
 } from '../api/source'
 import { useAppStore } from '../stores/app'
 import { useSourceStore } from '../stores/source'
@@ -536,7 +537,7 @@ async function saveSubscription() {
     appStore.showToast('请输入远程书源链接', 'warning')
     return
   }
-  if (!subscriptions.value.find((item) => item.url === remoteUrl.value)) {
+  if (!subscriptions.value.find((item: SourceSubscription) => item.url === remoteUrl.value)) {
     try {
       await addRemoteSubscription(remoteUrl.value)
       subscriptions.value.unshift({ url: remoteUrl.value })
@@ -555,7 +556,7 @@ async function syncSubscription(url: string) {
 async function removeSubscription(url: string) {
   try {
     await removeRemoteSubscription(url)
-    subscriptions.value = subscriptions.value.filter((item) => item.url !== url)
+    subscriptions.value = subscriptions.value.filter((item: SourceSubscription) => item.url !== url)
   } catch (e: unknown) {
     appStore.showToast((e as Error).message || '删除订阅失败', 'error')
   }
@@ -564,7 +565,7 @@ async function removeSubscription(url: string) {
 async function touchSubscription(url: string) {
   try {
     await updateRemoteSubscriptionSynced(url)
-    const existing = subscriptions.value.find((item) => item.url === url)
+    const existing = subscriptions.value.find((item: SourceSubscription) => item.url === url)
     if (existing) {
       existing.lastSyncedAt = Date.now()
     } else {

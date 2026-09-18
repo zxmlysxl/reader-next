@@ -244,7 +244,7 @@ onMounted(async () => {
   // 1. Try server DB first — this is the permanent source of truth
   if (store.book) {
     try {
-      const fromDb = await getAvailableBookSource({
+      const raw = await getAvailableBookSource({
         url: store.book.bookUrl,
         name: store.book.name,
         author: store.book.author,
@@ -254,6 +254,9 @@ onMounted(async () => {
         resultLimit: 50,
         concurrentCount: AVAILABLE_CONCURRENT_COUNT,
       })
+      // normalizeAvailableBookSourceResult returns SearchBook[] for array result,
+      // or AvailableBookSourceResult { books, lastIndex, hasMore } for object result
+      const fromDb = Array.isArray(raw) ? raw : raw.books
       if (fromDb.length > 0) {
         // Merge DB results into local state (avoid duplicates with current origin)
         mergeCandidates(fromDb)
