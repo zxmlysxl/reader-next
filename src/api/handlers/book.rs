@@ -2956,6 +2956,41 @@ pub async fn get_available_book_source(
             .book_source_candidate_repo
             .upsert_candidates(&user_ns, &book.book_url, &candidates)
             .await;
+        // Also write to file (mirrors original reader's storage approach)
+        let storage_dir = state.book_service.storage_dir().to_string_lossy().to_string();
+        let book_name = book.name.clone();
+        let book_author = book.author.clone();
+        let user_ns_clone = user_ns.clone();
+        let candidates_clone: Vec<_> = candidates.into_iter().map(|c| {
+            crate::model::search::SearchBook {
+                name: c.name.clone(),
+                author: c.author.clone(),
+                book_url: c.book_url.clone(),
+                origin: c.origin.clone(),
+                cover_url: c.cover_url.clone(),
+                intro: c.intro.clone(),
+                kind: c.kind.clone(),
+                last_chapter: c.latest_chapter_title.clone(),
+                update_time: c.update_time.map(|v| v.to_string()),
+                word_count: c.word_count.map(|v| v.to_string()),
+                book_source_urls: None,
+            }
+        }).collect();
+        tokio::spawn(async move {
+            // Serialize as SearchBook[] (has serde)
+            let path = candidate_file_path(&storage_dir, &user_ns_clone, &book_name, &book_author);
+            if let Err(e) = ensure_candidate_dir(&storage_dir, &user_ns_clone).await {
+                tracing::warn!("failed to create candidate dir: {}", e);
+                return;
+            }
+            let json = match serde_json::to_string(&candidates_clone) {
+                Ok(j) => j,
+                Err(e) => { tracing::warn!("failed to serialize candidates: {}", e); return; }
+            };
+            if let Err(e) = tokio::fs::write(&path, json).await {
+                tracing::warn!("failed to write candidate file {}: {}", path, e);
+            }
+        });
     }
 
     if paged_request {
