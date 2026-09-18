@@ -16,6 +16,7 @@ use crate::storage::cache::file_cache::FileCache;
 use crate::storage::db::repo::BookRepo;
 use crate::util::hash::md5_hex;
 use crate::util::text::{normalize_source_url, repair_encoded_url};
+use std::path::Path;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
