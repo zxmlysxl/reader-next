@@ -2569,6 +2569,7 @@ pub async fn search_book_source_sse(
         let mut total = 0usize;
         let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
         let mut all_results: Vec<crate::model::search::SearchBook> = Vec::new();
+        let mut all_candidates: Vec<db::repo::BookSourceCandidate> = Vec::new();
 
         while (idx as usize) < sources.len() || !tasks.is_empty() {
             while tasks.len() < concurrent && (idx as usize) < sources.len() {
@@ -2590,12 +2591,26 @@ pub async fn search_book_source_sse(
 
             if let Some(res) = tasks.next().await {
                 if let Ok((cur_idx, Ok(list), target_name, target_author)) = res {
-                    let mut batch = Vec::new();
-                    for b in list {
-                        if available_source_matches_target(&b, &target_name, &target_author) {
-                            batch.push(b);
-                        }
+                    // Save ALL search results to candidates (no filtering); filtered subset for UI only
+                    for b in &list {
+                        let c = db::repo::BookSourceCandidate {
+                            name: b.name.clone(),
+                            author: b.author.clone(),
+                            book_url: b.book_url.clone(),
+                            origin: b.origin.clone(),
+                            cover_url: b.cover_url.clone(),
+                            intro: b.intro.clone(),
+                            kind: b.kind.clone(),
+                            latest_chapter_title: b.last_chapter.clone(),
+                            update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                            word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
+                        };
+                        all_candidates.push(c);
                     }
+                    let batch: Vec<_> = list
+                        .into_iter()
+                        .filter(|b| available_source_matches_target(b, &target_name, &target_author))
+                        .collect();
                     if !batch.is_empty() {
                         total += batch.len();
                         all_results.extend(batch.clone());
@@ -2611,25 +2626,10 @@ pub async fn search_book_source_sse(
             }
         }
 
-        if refresh || !all_results.is_empty() {
-            let candidates: Vec<_> = all_results
-                .iter()
-                .map(|b| db::repo::BookSourceCandidate {
-                    name: b.name.clone(),
-                    author: b.author.clone(),
-                    book_url: b.book_url.clone(),
-                    origin: b.origin.clone(),
-                    cover_url: b.cover_url.clone(),
-                    intro: b.intro.clone(),
-                    kind: b.kind.clone(),
-                    latest_chapter_title: b.last_chapter.clone(),
-                    update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
-                    word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
-                })
-                .collect();
+        if refresh || !all_candidates.is_empty() {
             let _ = state_clone
                 .book_source_candidate_repo
-                .upsert_candidates(&user_ns, &book.book_url, &candidates)
+                .upsert_candidates(&user_ns, &book.book_url, &all_candidates)
                 .await;
         }
         let _ = tx
