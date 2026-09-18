@@ -27,6 +27,8 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::convert::Infallible;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
@@ -2472,6 +2474,91 @@ pub async fn search_book_multi_sse(
     });
 
     Ok(Sse::new(ReceiverStream::new(rx).map(Ok)))
+}
+
+
+// ── Book Source Candidate File Storage ────────────────────────────────────────
+// Mirrors the original reader's storage-file approach: candidates are persisted
+// as JSON files so they survive across sessions/devices unlike localStorage.
+// File format: bookSource/{user_ns}/{book_name}_{book_author}_bookSource.json
+
+fn candidate_file_path(storage_dir: &str, user_ns: &str, book_name: &str, book_author: &str) -> String {
+    use std::path::PathBuf;
+    // Sanitize book name/author for use in file path
+    let safe_name = book_name
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != ':')
+        .collect::<String>();
+    let safe_author = book_author
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != ':')
+        .collect::<String>();
+    // Limit length to avoid very long file names
+    let safe_name = if safe_name.len() > 80 { &safe_name[..80] } else { &safe_name };
+    let safe_author = if safe_author.len() > 40 { &safe_author[..40] } else { &safe_author };
+    let filename = format!("{}_{}_bookSource.json", safe_name, safe_author);
+    PathBuf::from(storage_dir)
+        .join("bookSource")
+        .join(user_ns)
+        .join(&filename)
+        .to_string_lossy()
+        .to_string()
+}
+
+async fn ensure_candidate_dir(storage_dir: &str, user_ns: &str) -> std::io::Result<()> {
+    use std::path::PathBuf;
+    let dir = PathBuf::from(storage_dir).join("bookSource").join(user_ns);
+    tokio::fs::create_dir_all(&dir).await
+}
+
+async fn save_candidates_to_file(
+    candidates: &[db::repo::BookSourceCandidate],
+    storage_dir: &str,
+    user_ns: &str,
+    book_name: &str,
+    book_author: &str,
+) {
+    if candidates.is_empty() { return; }
+    if let Err(e) = ensure_candidate_dir(storage_dir, user_ns).await {
+        tracing::warn!("failed to create candidate dir: {}", e);
+        return;
+    }
+    let path = candidate_file_path(storage_dir, user_ns, book_name, book_author);
+    let json = match serde_json::to_string(candidates) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::warn!("failed to serialize candidates: {}", e);
+            return;
+        }
+    };
+    let mut file = match File::create(&path).await {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!("failed to create candidate file {}: {}", path, e);
+            return;
+        }
+    };
+    if let Err(e) = file.write_all(json.as_bytes()).await {
+        tracing::warn!("failed to write candidate file {}: {}", path, e);
+    }
+}
+
+async fn load_candidates_from_file(
+    storage_dir: &str,
+    user_ns: &str,
+    book_name: &str,
+    book_author: &str,
+) -> Option<Vec<db::repo::BookSourceCandidate>> {
+    let path = candidate_file_path(storage_dir, user_ns, book_name, book_author);
+    let mut file = match File::open(&path).await {
+        Ok(f) => f,
+        Err(_) => return None,
+    };
+    let mut contents = String::new();
+    if file.read_to_string(&mut contents).await.is_err() {
+        return None;
+    }
+    serde_json::from_str(&contents).ok()
 }
 
 pub async fn search_book_source_sse(
