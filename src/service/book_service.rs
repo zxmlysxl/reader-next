@@ -16,7 +16,6 @@ use crate::storage::cache::file_cache::FileCache;
 use crate::storage::db::repo::BookRepo;
 use crate::util::hash::md5_hex;
 use crate::util::text::{normalize_source_url, repair_encoded_url};
-use std::path::Path;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -58,8 +57,6 @@ pub struct BookSourceAvailability {
 }
 
 impl BookService {
-    pub fn storage_dir(&self) -> &Path { &self.storage_dir }
-
     pub fn new(http: HttpClient, parser: RuleEngine, cache: FileCache, book_repo: BookRepo, storage_dir: &str) -> Self {
         let storage_dir = PathBuf::from(storage_dir);
         Self {

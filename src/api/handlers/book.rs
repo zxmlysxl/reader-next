@@ -2480,123 +2480,6 @@ pub async fn search_book_multi_sse(
 // ── Book Source Candidate File Storage ────────────────────────────────────────
 // Mirrors the original reader's storage-file approach: candidates are persisted
 // as JSON files so they survive across sessions/devices unlike localStorage.
-// File format: bookSource/{user_ns}/{book_name}_{book_author}_bookSource.json
-
-fn candidate_file_path(storage_dir: &str, user_ns: &str, book_name: &str, book_author: &str) -> String {
-    use std::path::PathBuf;
-    // Sanitize book name/author for use in file path
-    let safe_name = book_name
-        .chars()
-        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != ':')
-        .collect::<String>();
-    let safe_author = book_author
-        .chars()
-        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != ':')
-        .collect::<String>();
-    // Limit length to avoid very long file names
-    let safe_name = if safe_name.len() > 80 { &safe_name[..80] } else { &safe_name };
-    let safe_author = if safe_author.len() > 40 { &safe_author[..40] } else { &safe_author };
-    let filename = format!("{}_{}_bookSource.json", safe_name, safe_author);
-    PathBuf::from(storage_dir)
-        .join("bookSource")
-        .join(user_ns)
-        .join(&filename)
-        .to_string_lossy()
-        .to_string()
-}
-
-async fn ensure_candidate_dir(storage_dir: &str, user_ns: &str) -> std::io::Result<()> {
-    use std::path::PathBuf;
-    let dir = PathBuf::from(storage_dir).join("bookSource").join(user_ns);
-    tokio::fs::create_dir_all(&dir).await
-}
-
-async fn save_candidates_to_file(
-    candidates: &[db::repo::BookSourceCandidate],
-    storage_dir: &str,
-    user_ns: &str,
-    book_name: &str,
-    book_author: &str,
-) {
-    if candidates.is_empty() { return; }
-    if let Err(e) = ensure_candidate_dir(storage_dir, user_ns).await {
-        tracing::warn!("failed to create candidate dir: {}", e);
-        return;
-    }
-    let path = candidate_file_path(storage_dir, user_ns, book_name, book_author);
-    // Convert to SearchBook (has serde derives) for JSON serialization
-    let as_search_books: Vec<crate::model::search::SearchBook> = candidates
-        .iter()
-        .map(|c| crate::model::search::SearchBook {
-            name: c.name.clone(),
-            author: c.author.clone(),
-            book_url: c.book_url.clone(),
-            origin: c.origin.clone(),
-            cover_url: c.cover_url.clone(),
-            intro: c.intro.clone(),
-            kind: c.kind.clone(),
-            last_chapter: c.latest_chapter_title.clone(),
-            update_time: c.update_time.map(|v| v.to_string()),
-            word_count: c.word_count.map(|v| v.to_string()),
-            book_source_urls: None,
-        })
-        .collect();
-    let json = match serde_json::to_string(&as_search_books) {
-        Ok(j) => j,
-        Err(e) => {
-            tracing::warn!("failed to serialize candidates: {}", e);
-            return;
-        }
-    };
-    let mut file = match File::create(&path).await {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!("failed to create candidate file {}: {}", path, e);
-            return;
-        }
-    };
-    if let Err(e) = file.write_all(json.as_bytes()).await {
-        tracing::warn!("failed to write candidate file {}: {}", path, e);
-    }
-}
-
-async fn load_candidates_from_file(
-    storage_dir: &str,
-    user_ns: &str,
-    book_name: &str,
-    book_author: &str,
-) -> Option<Vec<db::repo::BookSourceCandidate>> {
-    let path = candidate_file_path(storage_dir, user_ns, book_name, book_author);
-    let mut file = match File::open(&path).await {
-        Ok(f) => f,
-        Err(_) => return None,
-    };
-    let mut contents = String::new();
-    if file.read_to_string(&mut contents).await.is_err() {
-        return None;
-    }
-    // Deserialize as SearchBook (has serde), then convert back to BookSourceCandidate
-    let search_books: Vec<crate::model::search::SearchBook> = match serde_json::from_str(&contents) {
-        Ok(books) => books,
-        Err(_) => return None,
-    };
-    Some(search_books
-        .into_iter()
-        .map(|b| db::repo::BookSourceCandidate {
-            name: b.name,
-            author: b.author,
-            book_url: b.book_url,
-            origin: b.origin,
-            cover_url: b.cover_url,
-            intro: b.intro,
-            kind: b.kind,
-            latest_chapter_title: b.last_chapter,
-            update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
-            word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
-        })
-        .collect())
-}
-
 pub async fn search_book_source_sse(
     State(state): State<AppState>,
     auth: AuthContext,
@@ -2749,22 +2632,12 @@ pub async fn search_book_source_sse(
             }
         }
 
-        if refresh || !all_candidates.is_empty() {
-            // Write to DB
+        // Write all collected candidates to DB for permanent storage
+        if !all_candidates.is_empty() || refresh {
             let _ = state_clone
                 .book_source_candidate_repo
                 .upsert_candidates(&user_ns, &book.book_url, &all_candidates)
                 .await;
-            // Also write to file (mirrors original reader's storage approach)
-            let storage_dir = state_clone.book_service.storage_dir().to_string_lossy().to_string();
-            let book_name = book.name.clone();
-            let book_author = book.author.clone();
-            let user_ns_clone = user_ns.clone();
-            // Move candidates into the async block (BookSourceCandidate has no Clone derive)
-            let candidates = std::mem::take(&mut all_candidates);
-            tokio::spawn(async move {
-                save_candidates_to_file(&candidates, &storage_dir, &user_ns_clone, &book_name, &book_author).await;
-            });
         }
         let _ = tx
             .send(Event::default().event("end").data(json_end(last_idx)))
@@ -2935,8 +2808,8 @@ pub async fn get_available_book_source(
         }
     }
 
-    let has_more = (last_index + 1).max(0) < sources.len() as i32;
-    if !has_more && req.last_index.unwrap_or(-1) < 0 {
+    // Persist all results to DB for permanent storage
+    if !result.is_empty() || refresh {
         let candidates: Vec<_> = result
             .iter()
             .map(|b| db::repo::BookSourceCandidate {
@@ -2956,42 +2829,6 @@ pub async fn get_available_book_source(
             .book_source_candidate_repo
             .upsert_candidates(&user_ns, &book.book_url, &candidates)
             .await;
-        // Also write to file (mirrors original reader's storage approach)
-        tracing::info!("[book] getAvailableBookSourceSSE saving {} candidates to file for book:{} author:{}", candidates.len(), book.name, book.author);
-        let storage_dir = state.book_service.storage_dir().to_string_lossy().to_string();
-        let book_name = book.name.clone();
-        let book_author = book.author.clone();
-        let user_ns_clone = user_ns.clone();
-        let candidates_clone: Vec<_> = candidates.into_iter().map(|c| {
-            crate::model::search::SearchBook {
-                name: c.name.clone(),
-                author: c.author.clone(),
-                book_url: c.book_url.clone(),
-                origin: c.origin.clone(),
-                cover_url: c.cover_url.clone(),
-                intro: c.intro.clone(),
-                kind: c.kind.clone(),
-                last_chapter: c.latest_chapter_title.clone(),
-                update_time: c.update_time.map(|v| v.to_string()),
-                word_count: c.word_count.map(|v| v.to_string()),
-                book_source_urls: None,
-            }
-        }).collect();
-        tokio::spawn(async move {
-            // Serialize as SearchBook[] (has serde)
-            let path = candidate_file_path(&storage_dir, &user_ns_clone, &book_name, &book_author);
-            if let Err(e) = ensure_candidate_dir(&storage_dir, &user_ns_clone).await {
-                tracing::warn!("failed to create candidate dir: {}", e);
-                return;
-            }
-            let json = match serde_json::to_string(&candidates_clone) {
-                Ok(j) => j,
-                Err(e) => { tracing::warn!("failed to serialize candidates: {}", e); return; }
-            };
-            if let Err(e) = tokio::fs::write(&path, json).await {
-                tracing::warn!("failed to write candidate file {}: {}", path, e);
-            }
-        });
     }
 
     if paged_request {
@@ -3089,29 +2926,18 @@ pub async fn get_available_book_source_sse(
 
     let (tx, rx) = mpsc::channel::<Event>(16);
 
+    // Check DB cache first (only for initial load, not refresh)
     if !refresh && last_index_start < 0 {
-        // Check file storage first (mirrors original reader's storage approach)
-        let candidates_from_file = load_candidates_from_file(
-            &state.config.storage_dir,
-            &user_ns,
-            &book.name,
-            &book.author,
-        ).await;
         if let Some(ref url) = book_url {
-            let candidates_to_use = if let Some(file_candidates) = candidates_from_file {
-                file_candidates
-            } else if let Ok(candidates) = state
+            if let Ok(candidates) = state
                 .book_source_candidate_repo
                 .get_candidates(&user_ns, url)
                 .await
             {
-                candidates
-            } else {
-                Vec::new()
-            };
-            if !candidates_to_use.is_empty() {
                 let current_origin = book.origin.clone();
-                let cached: Vec<SearchBook> = candidates_to_use
+            if !candidates.is_empty() {
+                let current_origin = book.origin.clone();
+                let cached: Vec<SearchBook> = candidates
                     .into_iter()
                     .map(|c| SearchBook {
                         name: c.name,
@@ -3275,11 +3101,28 @@ pub async fn get_available_book_source_sse(
             last_idx
         };
 
-        // NOTE: Do NOT save fallback search results back to DB.
-        // getAvailableBookSourceSSE(lastIndex=-1) is a cache-read path; saving
-        // a sparse fallback result (e.g. only the book itself = 1 item) here
-        // would overwrite the rich candidate cache built by search_book_source_sse.
-        // All comprehensive saving is done by search_book_source_sse only.
+        // Persist all results to DB for permanent storage
+        if !all_results.is_empty() || refresh {
+            let candidates: Vec<_> = all_results
+                .iter()
+                .map(|b| db::repo::BookSourceCandidate {
+                    name: b.name.clone(),
+                    author: b.author.clone(),
+                    book_url: b.book_url.clone(),
+                    origin: b.origin.clone(),
+                    cover_url: b.cover_url.clone(),
+                    intro: b.intro.clone(),
+                    kind: b.kind.clone(),
+                    latest_chapter_title: b.last_chapter.clone(),
+                    update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                    word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
+                })
+                .collect();
+            let _ = state_clone
+                .book_source_candidate_repo
+                .upsert_candidates(&user_ns, &book.book_url, &candidates)
+                .await;
+        }
 
         let _ = tx
             .send(Event::default().event("end").data(
