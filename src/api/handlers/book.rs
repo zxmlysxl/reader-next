@@ -3091,27 +3091,11 @@ pub async fn get_available_book_source_sse(
             last_idx
         };
 
-        if !has_more && last_index_start < 0 {
-            let candidates: Vec<_> = all_results
-                .iter()
-                .map(|b| db::repo::BookSourceCandidate {
-                    name: b.name.clone(),
-                    author: b.author.clone(),
-                    book_url: b.book_url.clone(),
-                    origin: b.origin.clone(),
-                    cover_url: b.cover_url.clone(),
-                    intro: b.intro.clone(),
-                    kind: b.kind.clone(),
-                    latest_chapter_title: b.last_chapter.clone(),
-                    update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
-                    word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
-                })
-                .collect();
-            let _ = state_clone
-                .book_source_candidate_repo
-                .upsert_candidates(&user_ns, &book.book_url, &candidates)
-                .await;
-        }
+        // NOTE: Do NOT save fallback search results back to DB.
+        // getAvailableBookSourceSSE(lastIndex=-1) is a cache-read path; saving
+        // a sparse fallback result (e.g. only the book itself = 1 item) here
+        // would overwrite the rich candidate cache built by search_book_source_sse.
+        // All comprehensive saving is done by search_book_source_sse only.
 
         let _ = tx
             .send(Event::default().event("end").data(
