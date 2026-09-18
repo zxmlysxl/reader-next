@@ -2750,10 +2750,20 @@ pub async fn search_book_source_sse(
         }
 
         if refresh || !all_candidates.is_empty() {
+            // Write to DB
             let _ = state_clone
                 .book_source_candidate_repo
                 .upsert_candidates(&user_ns, &book.book_url, &all_candidates)
                 .await;
+            // Also write to file (mirrors original reader's storage approach)
+            let storage_dir = state_clone.book_service.storage_dir().to_string_lossy().to_string();
+            let book_name = book.name.clone();
+            let book_author = book.author.clone();
+            let user_ns_clone = user_ns.clone();
+            let candidates_clone = all_candidates.clone();
+            tokio::spawn(async move {
+                save_candidates_to_file(&candidates_clone, &storage_dir, &user_ns_clone, &book_name, &book_author).await;
+            });
         }
         let _ = tx
             .send(Event::default().event("end").data(json_end(last_idx)))
@@ -3043,14 +3053,28 @@ pub async fn get_available_book_source_sse(
     let (tx, rx) = mpsc::channel::<Event>(16);
 
     if !refresh && last_index_start < 0 {
+        // Check file storage first (mirrors original reader's storage approach)
+        let candidates_from_file = load_candidates_from_file(
+            &state.config.storage_dir,
+            &user_ns,
+            &book.name,
+            &book.author,
+        ).await;
         if let Some(ref url) = book_url {
-            if let Ok(candidates) = state
+            let candidates_to_use = if let Some(file_candidates) = candidates_from_file {
+                file_candidates
+            } else if let Ok(candidates) = state
                 .book_source_candidate_repo
                 .get_candidates(&user_ns, url)
                 .await
             {
+                candidates
+            } else {
+                Vec::new()
+            };
+            if !candidates_to_use.is_empty() {
                 let current_origin = book.origin.clone();
-                let cached: Vec<SearchBook> = candidates
+                let cached: Vec<SearchBook> = candidates_to_use
                     .into_iter()
                     .map(|c| SearchBook {
                         name: c.name,
