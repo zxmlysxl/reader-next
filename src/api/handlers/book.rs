@@ -2957,6 +2957,7 @@ pub async fn get_available_book_source(
             .upsert_candidates(&user_ns, &book.book_url, &candidates)
             .await;
         // Also write to file (mirrors original reader's storage approach)
+        tracing::info!("[book] getAvailableBookSourceSSE saving {} candidates to file for book:{} author:{}", candidates.len(), book.name, book.author);
         let storage_dir = state.book_service.storage_dir().to_string_lossy().to_string();
         let book_name = book.name.clone();
         let book_author = book.author.clone();
