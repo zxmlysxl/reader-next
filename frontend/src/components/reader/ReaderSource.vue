@@ -364,7 +364,11 @@ function applyAvailableSourcePayload(payload: AvailableSourceSSEPayload | null) 
     hasMoreSources.value = payload.hasMore
   }
   mergeCandidates(incoming)
-  saveCachedResults()
+  // Only persist if we received actual new data; avoid overwriting
+  // existing cached results when fallback search returns 0 matches.
+  if (incoming.length > 0) {
+    saveCachedResults()
+  }
 
   if (!selectedCandidate.value && preparedResults.value.length) {
     void selectCandidate(preparedResults.value[0])
