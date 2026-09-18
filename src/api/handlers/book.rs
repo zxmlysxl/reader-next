@@ -2760,9 +2760,10 @@ pub async fn search_book_source_sse(
             let book_name = book.name.clone();
             let book_author = book.author.clone();
             let user_ns_clone = user_ns.clone();
-            let candidates_clone = all_candidates.clone();
+            // Move candidates into the async block (BookSourceCandidate has no Clone derive)
+            let candidates = std::mem::take(&mut all_candidates);
             tokio::spawn(async move {
-                save_candidates_to_file(&candidates_clone, &storage_dir, &user_ns_clone, &book_name, &book_author).await;
+                save_candidates_to_file(&candidates, &storage_dir, &user_ns_clone, &book_name, &book_author).await;
             });
         }
         let _ = tx
