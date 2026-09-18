@@ -1,6 +1,7 @@
 use crate::error::error::AppError;
 use crate::model::book_source::BookSource;
 use crate::util::time::now_ts;
+use crate::model::remote_subscription::RemoteSubscription;
 use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
@@ -223,7 +224,7 @@ impl BookRepo {
 
 // ── RemoteSubscriptionRepo ──────────────────────────────────────────────────
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct RemoteSubscriptionRepo {
     pool: SqlitePool,
 }
@@ -249,7 +250,7 @@ impl RemoteSubscriptionRepo {
     }
 
     pub async fn list(&self, user_ns: &str) -> Result<Vec<RemoteSubscription>, AppError> {
-        let rows = sqlx::query_as::<_, RemoteSubscriptionRow>(
+        let rows = sqlx::query_as::<_, RemoteSubscription>(
             "SELECT id, user_ns, url, last_synced_at, created_at, updated_at \
              FROM remote_subscriptions WHERE user_ns=?1 ORDER BY updated_at DESC",
         )
@@ -284,15 +285,7 @@ impl RemoteSubscriptionRepo {
     }
 }
 
-#[derive(Debug, sqlx::FromRow)]
-struct RemoteSubscriptionRow {
-    id: Option<i64>,
-    user_ns: String,
-    url: String,
-    last_synced_at: Option<i64>,
-    created_at: i64,
-    updated_at: i64,
-}
+
 
 impl From<RemoteSubscriptionRow> for RemoteSubscription {
     fn from(r: RemoteSubscriptionRow) -> Self {
@@ -309,7 +302,6 @@ impl From<RemoteSubscriptionRow> for RemoteSubscription {
 
 // ── BookSourceCandidateRepo ──────────────────────────────────────────────────
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BookSourceCandidate {
     pub name: String,
     pub author: String,
