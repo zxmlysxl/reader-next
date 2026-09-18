@@ -2477,9 +2477,6 @@ pub async fn search_book_multi_sse(
 }
 
 
-// ── Book Source Candidate File Storage ────────────────────────────────────────
-// Mirrors the original reader's storage-file approach: candidates are persisted
-// as JSON files so they survive across sessions/devices unlike localStorage.
 pub async fn search_book_source_sse(
     State(state): State<AppState>,
     auth: AuthContext,
@@ -2808,7 +2805,7 @@ pub async fn get_available_book_source(
         }
     }
 
-    // Persist all results to DB for permanent storage
+        // Persist all results to DB for permanent storage
     if !result.is_empty() || refresh {
         let candidates: Vec<_> = result
             .iter()
@@ -2926,7 +2923,6 @@ pub async fn get_available_book_source_sse(
 
     let (tx, rx) = mpsc::channel::<Event>(16);
 
-    // Check DB cache first (only for initial load, not refresh)
     if !refresh && last_index_start < 0 {
         if let Some(ref url) = book_url {
             if let Ok(candidates) = state
@@ -2934,10 +2930,13 @@ pub async fn get_available_book_source_sse(
                 .get_candidates(&user_ns, url)
                 .await
             {
+                candidates
+            } else {
+                Vec::new()
+            };
+            if !candidates_to_use.is_empty() {
                 let current_origin = book.origin.clone();
-            if !candidates.is_empty() {
-                let current_origin = book.origin.clone();
-                let cached: Vec<SearchBook> = candidates
+                let cached: Vec<SearchBook> = candidates_to_use
                     .into_iter()
                     .map(|c| SearchBook {
                         name: c.name,
@@ -3101,28 +3100,11 @@ pub async fn get_available_book_source_sse(
             last_idx
         };
 
-        // Persist all results to DB for permanent storage
-        if !all_results.is_empty() || refresh {
-            let candidates: Vec<_> = all_results
-                .iter()
-                .map(|b| db::repo::BookSourceCandidate {
-                    name: b.name.clone(),
-                    author: b.author.clone(),
-                    book_url: b.book_url.clone(),
-                    origin: b.origin.clone(),
-                    cover_url: b.cover_url.clone(),
-                    intro: b.intro.clone(),
-                    kind: b.kind.clone(),
-                    latest_chapter_title: b.last_chapter.clone(),
-                    update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
-                    word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
-                })
-                .collect();
-            let _ = state_clone
-                .book_source_candidate_repo
-                .upsert_candidates(&user_ns, &book.book_url, &candidates)
-                .await;
-        }
+        // NOTE: Do NOT save fallback search results back to DB.
+        // getAvailableBookSourceSSE(lastIndex=-1) is a cache-read path; saving
+        // a sparse fallback result (e.g. only the book itself = 1 item) here
+        // would overwrite the rich candidate cache built by search_book_source_sse.
+        // All comprehensive saving is done by search_book_source_sse only.
 
         let _ = tx
             .send(Event::default().event("end").data(

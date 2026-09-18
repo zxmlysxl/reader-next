@@ -57,6 +57,7 @@ pub struct BookSourceAvailability {
 }
 
 impl BookService {
+
     pub fn new(http: HttpClient, parser: RuleEngine, cache: FileCache, book_repo: BookRepo, storage_dir: &str) -> Self {
         let storage_dir = PathBuf::from(storage_dir);
         Self {
