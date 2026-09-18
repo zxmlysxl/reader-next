@@ -2707,8 +2707,8 @@ pub async fn get_available_book_source(
                         intro: c.intro,
                         kind: c.kind,
                         last_chapter: c.latest_chapter_title,
-                        update_time: c.update_time,
-                        word_count: c.word_count,
+                        update_time: c.update_time.map(|v| v.to_string()),
+                        word_count: c.word_count.map(|v| v.to_string()),
                         book_source_urls: None,
                     })
                     .collect();
@@ -2938,8 +2938,8 @@ pub async fn get_available_book_source_sse(
                         intro: c.intro,
                         kind: c.kind,
                         last_chapter: c.latest_chapter_title,
-                        update_time: c.update_time,
-                        word_count: c.word_count,
+                        update_time: c.update_time.map(|v| v.to_string()),
+                        word_count: c.word_count.map(|v| v.to_string()),
                         book_source_urls: None,
                     })
                     .collect();
