@@ -163,7 +163,6 @@ function loadCachedResults(): SearchBook[] {
     if (raw) {
       const cached = JSON.parse(raw) as { results: SearchBook[]; lastIndex: number; hasMore: boolean }
       if (Array.isArray(cached.results) && cached.results.length > 0) {
-        console.log("[ReaderSource] loadCachedResults: found", cached.results.length, "items, lastIndex=", cached.lastIndex)
         lastIndex.value = cached.lastIndex ?? -1
         hasMoreSources.value = cached.hasMore ?? true
         return cached.results
@@ -174,7 +173,6 @@ function loadCachedResults(): SearchBook[] {
 }
 
 function saveCachedResults() {
-  console.log("[ReaderSource] saveCachedResults: results.length=", results.value.length)
   if (!store.book) return
   localStorage.setItem(cacheKey(store.book.bookUrl, store.book.origin), JSON.stringify({
     results: results.value,
@@ -243,11 +241,9 @@ const preparedResults = computed<CandidateItem[]>(() => {
 })
 
 onMounted(async () => {
-  console.log("[ReaderSource] onMounted: book=", store.book?.name, "origin=", store.book?.origin)
   // 1. Try server DB first — this is the permanent source of truth
   if (store.book) {
     try {
-      console.log("[ReaderSource] calling getAvailableBookSource API...")
       const raw = await getAvailableBookSource({
         url: store.book.bookUrl,
         name: store.book.name,
@@ -261,7 +257,6 @@ onMounted(async () => {
       // normalizeAvailableBookSourceResult returns SearchBook[] for array result,
       // or AvailableBookSourceResult { books, lastIndex, hasMore } for object result
       const fromDb = Array.isArray(raw) ? raw : raw.books
-      console.log("[ReaderSource] getAvailableBookSource returned:", fromDb.length, "items, raw type:", Array.isArray(raw) ? "array" : "object")
       if (fromDb.length > 0) {
         // Merge DB results into local state (avoid duplicates with current origin)
         mergeCandidates(fromDb)
@@ -271,8 +266,9 @@ onMounted(async () => {
         }
       }
     } catch (err) {
-      console.error("[ReaderSource] getAvailableBookSource failed:", err?.message || err
-      // fallback to localStorage
+      if (store.book) {
+        localStorage.removeItem(cacheKey(store.book.bookUrl, store.book.origin))
+      }
     }
   }
 
@@ -302,7 +298,6 @@ onUnmounted(() => {
 })
 
 function startSearch() {
-  console.log("[ReaderSource] startSearch called")
   if (!store.book) return
   closeAvailableSourceSSE()
   searching.value = true
@@ -370,8 +365,6 @@ function applyAvailableSourcePayload(payload: AvailableSourceSSEPayload | null) 
   if (typeof payload.hasMore === 'boolean') {
     hasMoreSources.value = payload.hasMore
   }
-  console.log("[ReaderSource] applyAvailableSourcePayload: incoming.length=", incoming.length, "results.length=", results.value.length)
-  console.log("[ReaderSource] applyAvailableSourcePayload: hasMore=", payload.hasMore, "lastIndex=", payload.lastIndex)
   mergeCandidates(incoming)
   // Only persist if we received actual new data; avoid overwriting
   // existing cached results when fallback search returns 0 matches.
@@ -432,7 +425,6 @@ function finishAvailableSourceSSE(
     loadingMore.value = false
   }
 
-  console.log("[ReaderSource] finishAvailableSourceSSE: mode=", mode, "beforeCount=", beforeCount, "results.length=", results.value.length, "failed=", failed)
   if (!selectedCandidate.value && preparedResults.value.length) {
     void selectCandidate(preparedResults.value[0])
   }
