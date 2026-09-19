@@ -333,8 +333,8 @@ impl BookSourceCandidateRepo {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
             )
             .bind(user_ns)
-            .bind(&c.name)
             .bind(&c.book_url)
+            .bind(&c.name)
             .bind(&c.author)
             .bind(&c.origin)
             .bind(&c.cover_url)
