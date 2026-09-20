@@ -2571,6 +2571,7 @@ pub async fn search_book_source_sse(
         let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
         let mut all_results: Vec<crate::model::search::SearchBook> = Vec::new();
         let mut all_candidates: Vec<db::repo::BookSourceCandidate> = Vec::new();
+        let mut db_write_handles: Vec<_> = Vec::new();
 
         while (idx as usize) < sources.len() || !tasks.is_empty() {
             while tasks.len() < concurrent && (idx as usize) < sources.len() {
@@ -2613,14 +2614,14 @@ pub async fn search_book_source_sse(
                     let user_ns_for_write = user_ns.clone();
                     let book_url_for_write = book.book_url.clone();
                     let repo = state_clone.book_source_candidate_repo.clone();
-                    tokio::spawn(async move {
+                    db_write_handles.push(tokio::spawn(async move {
                         if !batch_for_db.is_empty() {
                             tracing::debug!("upsert batch: {} records for {}", batch_for_db.len(), book_url_for_write);
                             if let Err(e) = repo.upsert_candidates(&user_ns_for_write, &book_url_for_write, &batch_for_db).await {
                                 tracing::error!("upsert_candidates batch failed: {:?}", e);
                             }
                         }
-                    });
+                    }));
                     let batch: Vec<_> = list
                         .into_iter()
                         .filter(|b| available_source_matches_target(b, &target_name, &target_author))
@@ -2640,7 +2641,10 @@ pub async fn search_book_source_sse(
             }
         }
 
-        // Final flush: write any remaining candidates not yet persisted
+        // Final flush: wait for all batch writes to complete, then write final complete set
+        if !db_write_handles.is_empty() {
+            futures::future::join_all(db_write_handles).await;
+        }
         if !all_candidates.is_empty() || refresh {
             let total = all_candidates.len();
             let user_ns_for_write = user_ns.clone();
@@ -2653,7 +2657,7 @@ pub async fn search_book_source_sse(
                 } else {
                     tracing::info!("upsert_candidates final flush success: {} records", total);
                 }
-            });
+            }).await.ok();
         }
         let _ = tx
             .send(Event::default().event("end").data(json_end(last_idx)))
