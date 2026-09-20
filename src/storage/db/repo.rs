@@ -322,7 +322,7 @@ impl BookSourceCandidateRepo {
         tracing::info!("upsert_candidates called: user_ns={}, book_url={}, len={}", user_ns, book_url, candidates.len());
         let mut tx = sqlx::Acquire::begin(&self.pool).await.map_err(|e| {
             tracing::error!("upsert_candidates begin failed: {:?}", e);
-            AppError::Internal(e.to_string())
+            AppError::Internal(anyhow::anyhow!(e.to_string()))
         })?;
         // Delete existing candidates for this book_url
         sqlx::query("DELETE FROM book_source_candidates WHERE user_ns=?1 AND book_url=?2")
@@ -332,7 +332,7 @@ impl BookSourceCandidateRepo {
             .await
             .map_err(|e| {
                 tracing::error!("upsert_candidates DELETE failed: {:?}", e);
-                AppError::Internal(e.to_string())
+                AppError::Internal(anyhow::anyhow!(e.to_string()))
             })?;
         let now = now_ts();
         for c in candidates {
@@ -357,12 +357,12 @@ impl BookSourceCandidateRepo {
             .await
             .map_err(|e| {
                 tracing::error!("upsert_candidates INSERT failed for name={}: {:?}", c.name, e);
-                AppError::Internal(e.to_string())
+                AppError::Internal(anyhow::anyhow!(e.to_string()))
             })?;
         }
         tx.commit().await.map_err(|e| {
             tracing::error!("upsert_candidates commit failed: {:?}", e);
-            AppError::Internal(e.to_string())
+            AppError::Internal(anyhow::anyhow!(e.to_string()))
         })?;
         tracing::info!("upsert_candidates success: {} records for book_url={}", candidates.len(), book_url);
         Ok(())
