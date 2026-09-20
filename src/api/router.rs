@@ -190,6 +190,9 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/reader3/getAvailableBookSources",
             get(handlers::get_available_book_sources),
+        )
+        .route(
+            "/reader3/getAvailableBookSources",
             post(handlers::sync_book_source_candidates),
         )
         .route(
