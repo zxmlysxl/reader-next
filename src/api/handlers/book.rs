@@ -2399,12 +2399,17 @@ pub async fn search_book_multi_sse(
             }
         };
 
+        // Synthetic book_url so search results are persisted to DB under the same key
+        // as what the frontend uses when calling getAvailableBookSource / syncBookSourceCandidates
+        let synthetic_book_url = format!("search:{}:{}", user_ns, key);
         let mut idx = last_index + 1;
         let mut last_idx = last_index;
         let mut result_map = std::collections::HashSet::<String>::new();
         let mut total = 0usize;
         let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
         let mut stop_adding = false;
+        let mut all_candidates: Vec<db::repo::BookSourceCandidate> = Vec::new();
+        let mut db_write_handles: Vec<_> = Vec::new();
 
         while (idx as usize) < sources.len() || !tasks.is_empty() {
             // Only add new tasks if we haven't reached search_size yet
@@ -2442,6 +2447,39 @@ pub async fn search_book_multi_sse(
                 match res {
                     Ok((cur_idx, _source_name, Ok(list))) => {
                         last_idx = cur_idx;
+                        // Persist ALL results to DB (no filtering) so we can re-query on next visit
+                        let batch_for_db: Vec<_> = list
+                            .iter()
+                            .map(|b| db::repo::BookSourceCandidate {
+                                name: b.name.clone(),
+                                author: b.author.clone(),
+                                book_url: b.book_url.clone(),
+                                origin: b.origin.clone(),
+                                cover_url: b.cover_url.clone(),
+                                intro: b.intro.clone(),
+                                kind: b.kind.clone(),
+                                latest_chapter_title: b.last_chapter.clone(),
+                                update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                                word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
+                            })
+                            .collect();
+                        let user_ns_for_write = user_ns.clone();
+                        let book_url_for_write = synthetic_book_url.clone();
+                        let repo = state_clone.book_source_candidate_repo.clone();
+                        let batch_clone = batch_for_db.clone();
+                        db_write_handles.push(tokio::spawn(async move {
+                            if !batch_clone.is_empty() {
+                                tracing::debug!("search multi upsert batch: {} records for {}", batch_clone.len(), book_url_for_write);
+                                if let Err(e) = repo
+                                    .upsert_candidates(&user_ns_for_write, &book_url_for_write, &batch_clone)
+                                    .await
+                                {
+                                    tracing::error!("search multi upsert batch failed: {:?}", e);
+                                }
+                            }
+                        }));
+                        all_candidates.extend(batch_for_db);
+
                         let batch = take_search_book_multi_sse_batch(&key, list, &mut result_map);
                         if !batch.is_empty() {
                             total += batch.len();
@@ -2464,6 +2502,30 @@ pub async fn search_book_multi_sse(
             } else {
                 break;
             }
+        }
+
+        // Wait for all batch writes, then final flush
+        if !db_write_handles.is_empty() {
+            futures::future::join_all(db_write_handles).await;
+        }
+        if !all_candidates.is_empty() {
+            let total_count = all_candidates.len();
+            let user_ns_for_write = user_ns.clone();
+            let book_url_for_write = synthetic_book_url.clone();
+            let repo = state_clone.book_source_candidate_repo.clone();
+            tokio::spawn(async move {
+                tracing::info!("search multi upsert final flush: user_ns={}, book_url={}, count={}", user_ns_for_write, book_url_for_write, total_count);
+                if let Err(e) = repo
+                    .upsert_candidates(&user_ns_for_write, &book_url_for_write, &all_candidates)
+                    .await
+                {
+                    tracing::error!("search multi upsert final flush failed: {:?}", e);
+                } else {
+                    tracing::info!("search multi upsert final flush success: {} records", total_count);
+                }
+            })
+            .await
+            .ok();
         }
 
         let _ = tx
