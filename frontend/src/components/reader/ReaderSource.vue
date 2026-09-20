@@ -275,13 +275,46 @@ onMounted(async () => {
   if (results.value.length === 0) {
     const cached = loadCachedResults()
     if (cached.length > 0) {
-      results.value = cached
-      const sel = loadCachedSelected()
-      if (sel) {
-        selectedCandidate.value = sel
-        void selectCandidate(sel)
-      } else if (preparedResults.value.length) {
-        void selectCandidate(preparedResults.value[0])
+      // Persist localStorage cache to DB so other devices can see it too,
+      // then use the (potentially merged) DB list as the source of truth.
+      try {
+        const fromDb = await syncBookSourceCandidates({
+          url: store.book!.bookUrl,
+          name: store.book!.name,
+          author: store.book!.author,
+          candidates: cached,
+        })
+        if (fromDb.length > 0) {
+          results.value = fromDb
+          saveCachedResults()
+          // Restore selected candidate from localStorage
+          const sel = loadCachedSelected()
+          if (sel) {
+            selectedCandidate.value = sel
+            void selectCandidate(sel)
+          } else if (preparedResults.value.length) {
+            void selectCandidate(preparedResults.value[0])
+          }
+        } else {
+          results.value = cached
+          const sel = loadCachedSelected()
+          if (sel) {
+            selectedCandidate.value = sel
+            void selectCandidate(sel)
+          } else if (preparedResults.value.length) {
+            void selectCandidate(preparedResults.value[0])
+          }
+        }
+      } catch {
+        // Sync failed — still use local cache
+        results.value = cached
+        const sel = loadCachedSelected()
+        if (sel) {
+          selectedCandidate.value = sel
+          void selectCandidate(sel)
+        } else if (preparedResults.value.length) {
+          void selectCandidate(preparedResults.value[0])
+        }
       }
     }
   }

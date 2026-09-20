@@ -57,6 +57,17 @@ export function getAvailableBookSource(params: {
     .then((r) => normalizeAvailableBookSourceResult(r.data))
 }
 
+export function syncBookSourceCandidates(params: {
+  url: string
+  name?: string
+  author?: string
+  candidates: SearchBook[]
+}) {
+  return http
+    .post<SearchBook[]>('/syncBookSourceCandidates', params)
+    .then((r) => r.data)
+}
+
 export function getAvailableBookSourceSSE(params: {
   url?: string
   name?: string

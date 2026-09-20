@@ -2906,6 +2906,89 @@ pub async fn get_available_book_source(
     )))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBookSourceCandidatesRequest {
+    pub url: String,
+    pub name: Option<String>,
+    pub author: Option<String>,
+    pub candidates: Vec<SearchBook>,
+}
+
+/// Accept candidates from browser localStorage cache, persist to DB, return
+/// the full merged list so every device sees the same data.
+pub async fn sync_book_source_candidates(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Json(req): Json<SyncBookSourceCandidatesRequest>,
+) -> Result<Json<ApiResponse<Vec<SearchBook>>>, AppError> {
+    let user_ns = state
+        .user_service
+        .resolve_user_ns_with_override(auth.access_token(), auth.secure_key(), auth.user_ns())
+        .await
+        .map_err(|_| AppError::BadRequest("NEED_LOGIN".to_string()))?;
+
+    tracing::info!(
+        "sync_book_source_candidates: user_ns={}, url={}, incoming={}",
+        user_ns, req.url, req.candidates.len()
+    );
+
+    if !req.candidates.is_empty() {
+        let candidates: Vec<_> = req
+            .candidates
+            .iter()
+            .map(|b| db::repo::BookSourceCandidate {
+                name: b.name.clone(),
+                author: b.author.clone(),
+                book_url: b.book_url.clone(),
+                origin: b.origin.clone(),
+                cover_url: b.cover_url.clone(),
+                intro: b.intro.clone(),
+                kind: b.kind.clone(),
+                latest_chapter_title: b.last_chapter.clone(),
+                update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
+            })
+            .collect();
+        if let Err(e) = state
+            .book_source_candidate_repo
+            .upsert_candidates(&user_ns, &req.url, &candidates)
+            .await
+        {
+            tracing::error!("sync upsert_candidates failed: {:?}", e);
+        } else {
+            tracing::info!("sync upsert_candidates success: {} records", candidates.len());
+        }
+    }
+
+    match state.book_source_candidate_repo.get_candidates(&user_ns, &req.url).await {
+        Ok(db_candidates) => {
+            let list: Vec<SearchBook> = db_candidates
+                .into_iter()
+                .map(|c| SearchBook {
+                    name: c.name,
+                    author: c.author,
+                    book_url: c.book_url,
+                    origin: c.origin,
+                    cover_url: c.cover_url,
+                    intro: c.intro,
+                    kind: c.kind,
+                    last_chapter: c.latest_chapter_title,
+                    update_time: c.update_time.map(|v| v.to_string()),
+                    word_count: c.word_count.map(|v| v.to_string()),
+                    book_source_urls: None,
+                })
+                .collect();
+            tracing::info!("sync returns {} candidates from DB", list.len());
+            Ok(Json(ApiResponse::ok(list)))
+        }
+        Err(e) => {
+            tracing::error!("sync get_candidates failed: {:?}", e);
+            Ok(Json(ApiResponse::ok(req.candidates)))
+        }
+    }
+}
+
 pub async fn get_available_book_sources(
     State(state): State<AppState>,
     auth: AuthContext,
