@@ -2720,45 +2720,40 @@ pub async fn get_available_book_source(
     let book = book.or_else(|| fallback_available_book(&req));
 
     let book = book.ok_or_else(|| AppError::BadRequest("书籍信息错误".to_string()))?;
-    if !paged_request {
-        if let Some(ref url) = book_url {
-            match state
-                .book_source_candidate_repo
-                .get_candidates(&user_ns, url)
-                .await
-            {
-                Ok(candidates) => {
-                    tracing::info!("REST get_candidates: found {} for url={}", candidates.len(), url);
-                    let list: Vec<SearchBook> = candidates
-                        .into_iter()
-                        .map(|c| SearchBook {
-                            name: c.name,
-                            author: c.author,
-                            book_url: c.book_url,
-                            origin: c.origin,
-                            cover_url: c.cover_url,
-                            intro: c.intro,
-                            kind: c.kind,
-                            last_chapter: c.latest_chapter_title,
-                            update_time: c.update_time.map(|v| v.to_string()),
-                            word_count: c.word_count.map(|v| v.to_string()),
-                            book_source_urls: None,
-                        })
-                        .collect();
-                    let list = take_available_source_cached_matches(
-                        list,
-                        None,
-                        &book.name,
-                        &book.author,
-                        usize::MAX,
-                    );
-                    return Ok(Json(ApiResponse::ok(
-                        serde_json::to_value(list).unwrap_or_default(),
-                    )));
-                }
-                Err(e) => {
-                    tracing::error!("REST get_candidates failed: {:?}", e);
-                }
+    // Always try DB first — candidates are written by SSE handler after each batch completes
+    if let Some(ref url) = book_url {
+        match state.book_source_candidate_repo.get_candidates(&user_ns, url).await {
+            Ok(candidates) => {
+                tracing::info!("REST get_candidates: found {} for url={}", candidates.len(), url);
+                let list: Vec<SearchBook> = candidates
+                    .into_iter()
+                    .map(|c| SearchBook {
+                        name: c.name,
+                        author: c.author,
+                        book_url: c.book_url,
+                        origin: c.origin,
+                        cover_url: c.cover_url,
+                        intro: c.intro,
+                        kind: c.kind,
+                        last_chapter: c.latest_chapter_title,
+                        update_time: c.update_time.map(|v| v.to_string()),
+                        word_count: c.word_count.map(|v| v.to_string()),
+                        book_source_urls: None,
+                    })
+                    .collect();
+                let list = take_available_source_cached_matches(
+                    list,
+                    None,
+                    &book.name,
+                    &book.author,
+                    usize::MAX,
+                );
+                return Ok(Json(ApiResponse::ok(
+                    serde_json::to_value(list).unwrap_or_default(),
+                )));
+            }
+            Err(e) => {
+                tracing::error!("REST get_candidates failed: {:?}", e);
             }
         }
     }
