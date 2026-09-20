@@ -2827,10 +2827,16 @@ pub async fn get_available_book_source(
                 word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
             })
             .collect();
-        let _ = state
+        tracing::info!("REST upsert_candidates: user_ns={}, book_url={}, count={}", user_ns, book.book_url, candidates.len());
+        if let Err(e) = state
             .book_source_candidate_repo
             .upsert_candidates(&user_ns, &book.book_url, &candidates)
-            .await;
+            .await
+        {
+            tracing::error!("REST upsert_candidates failed: {:?}", e);
+        } else {
+            tracing::info!("REST upsert_candidates success");
+        }
     }
 
     let has_more = cursor < sources.len();
