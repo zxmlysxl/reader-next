@@ -288,6 +288,7 @@ impl RemoteSubscriptionRepo {
 
 // ── BookSourceCandidateRepo ──────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct BookSourceCandidate {
     pub name: String,
     pub author: String,
