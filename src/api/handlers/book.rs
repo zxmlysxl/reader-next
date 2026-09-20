@@ -2608,6 +2608,19 @@ pub async fn search_book_source_sse(
                         };
                         all_candidates.push(c);
                     }
+                    // Persist to DB immediately after each batch so partial results survive page close
+                    let batch_for_db = all_candidates.clone();
+                    let user_ns_for_write = user_ns.clone();
+                    let book_url_for_write = book.book_url.clone();
+                    let repo = state_clone.book_source_candidate_repo.clone();
+                    tokio::spawn(async move {
+                        if !batch_for_db.is_empty() {
+                            tracing::debug!("upsert batch: {} records for {}", batch_for_db.len(), book_url_for_write);
+                            if let Err(e) = repo.upsert_candidates(&user_ns_for_write, &book_url_for_write, &batch_for_db).await {
+                                tracing::error!("upsert_candidates batch failed: {:?}", e);
+                            }
+                        }
+                    });
                     let batch: Vec<_> = list
                         .into_iter()
                         .filter(|b| available_source_matches_target(b, &target_name, &target_author))
@@ -2627,19 +2640,20 @@ pub async fn search_book_source_sse(
             }
         }
 
-        // Write all collected candidates to DB for permanent storage
+        // Final flush: write any remaining candidates not yet persisted
         if !all_candidates.is_empty() || refresh {
             let total = all_candidates.len();
-            tracing::info!("upsert_candidates: user_ns={}, book_url={}, count={}", user_ns, book.book_url, total);
-            if let Err(e) = state_clone
-                .book_source_candidate_repo
-                .upsert_candidates(&user_ns, &book.book_url, &all_candidates)
-                .await
-            {
-                tracing::error!("upsert_candidates failed: {:?}", e);
-            } else {
-                tracing::info!("upsert_candidates success: {} records", total);
-            }
+            let user_ns_for_write = user_ns.clone();
+            let book_url_for_write = book.book_url.clone();
+            let repo = state_clone.book_source_candidate_repo.clone();
+            tokio::spawn(async move {
+                tracing::info!("upsert_candidates final flush: user_ns={}, book_url={}, count={}", user_ns_for_write, book_url_for_write, total);
+                if let Err(e) = repo.upsert_candidates(&user_ns_for_write, &book_url_for_write, &all_candidates).await {
+                    tracing::error!("upsert_candidates final flush failed: {:?}", e);
+                } else {
+                    tracing::info!("upsert_candidates final flush success: {} records", total);
+                }
+            });
         }
         let _ = tx
             .send(Event::default().event("end").data(json_end(last_idx)))
@@ -2857,6 +2871,35 @@ pub async fn get_available_book_source(
         return Ok(Json(ApiResponse::ok(
             serde_json::to_value(response).unwrap_or_default(),
         )));
+    }
+
+    // paged_request path: also persist results to DB
+    if !result.is_empty() || refresh {
+        let candidates: Vec<_> = result
+            .iter()
+            .map(|b| db::repo::BookSourceCandidate {
+                name: b.name.clone(),
+                author: b.author.clone(),
+                book_url: b.book_url.clone(),
+                origin: b.origin.clone(),
+                cover_url: b.cover_url.clone(),
+                intro: b.intro.clone(),
+                kind: b.kind.clone(),
+                latest_chapter_title: b.last_chapter.clone(),
+                update_time: b.update_time.as_ref().and_then(|s| s.parse().ok()),
+                word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
+            })
+            .collect();
+        tracing::info!("REST paged upsert_candidates: user_ns={}, book_url={}, count={}", user_ns, book.book_url, candidates.len());
+        if let Err(e) = state
+            .book_source_candidate_repo
+            .upsert_candidates(&user_ns, &book.book_url, &candidates)
+            .await
+        {
+            tracing::error!("REST paged upsert_candidates failed: {:?}", e);
+        } else {
+            tracing::info!("REST paged upsert_candidates success");
+        }
     }
 
     Ok(Json(ApiResponse::ok(
