@@ -123,7 +123,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useReaderStore } from '../../stores/reader'
 import { useAppStore } from '../../stores/app'
-import { getAvailableBookSourceSSE, getAvailableBookSource } from '../../api/search'
+import { getAvailableBookSourceSSE, getAvailableBookSource, syncBookSourceCandidates } from '../../api/search'
 import { getBookInfo } from '../../api/bookshelf'
 import type { Book, SearchBook } from '../../types'
 
