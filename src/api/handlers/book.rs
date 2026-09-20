@@ -2409,7 +2409,6 @@ pub async fn search_book_multi_sse(
         let mut total = 0usize;
         let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
         let mut stop_adding = false;
-        let mut db_write_handles: Vec<_> = Vec::new();
 
         while (idx as usize) < sources.len() || !tasks.is_empty() {
             // Only add new tasks if we haven't reached search_size yet
@@ -2496,10 +2495,6 @@ pub async fn search_book_multi_sse(
             }
         }
 
-        // Wait for all batch writes, then flush each real book's candidates to DB
-        if !db_write_handles.is_empty() {
-            futures::future::join_all(db_write_handles).await;
-        }
         if !candidates_by_url.is_empty() {
             let user_ns_for_write = user_ns.clone();
             let repo = state_clone.book_source_candidate_repo.clone();
