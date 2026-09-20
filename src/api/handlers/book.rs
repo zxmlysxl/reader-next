@@ -2629,10 +2629,17 @@ pub async fn search_book_source_sse(
 
         // Write all collected candidates to DB for permanent storage
         if !all_candidates.is_empty() || refresh {
-            let _ = state_clone
+            let total = all_candidates.len();
+            tracing::info!("upsert_candidates: user_ns={}, book_url={}, count={}", user_ns, book.book_url, total);
+            if let Err(e) = state_clone
                 .book_source_candidate_repo
                 .upsert_candidates(&user_ns, &book.book_url, &all_candidates)
-                .await;
+                .await
+            {
+                tracing::error!("upsert_candidates failed: {:?}", e);
+            } else {
+                tracing::info!("upsert_candidates success: {} records", total);
+            }
         }
         let _ = tx
             .send(Event::default().event("end").data(json_end(last_idx)))
