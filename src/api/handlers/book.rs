@@ -2399,16 +2399,16 @@ pub async fn search_book_multi_sse(
             }
         };
 
-        // Synthetic book_url so search results are persisted to DB under the same key
-        // as what the frontend uses when calling getAvailableBookSource / syncBookSourceCandidates
-        let synthetic_book_url = format!("search:{}:{}", user_ns, key);
+        // Group candidates by their real book_url so getAvailableBookSource can find them later
+        // (it reads by the book's actual URL, not a synthetic key)
+        let mut candidates_by_url: std::collections::HashMap<String, Vec<db::repo::BookSourceCandidate>> =
+            std::collections::HashMap::new();
         let mut idx = last_index + 1;
         let mut last_idx = last_index;
         let mut result_map = std::collections::HashSet::<String>::new();
         let mut total = 0usize;
         let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
         let mut stop_adding = false;
-        let mut all_candidates: Vec<db::repo::BookSourceCandidate> = Vec::new();
         let mut db_write_handles: Vec<_> = Vec::new();
 
         while (idx as usize) < sources.len() || !tasks.is_empty() {
@@ -2463,22 +2463,14 @@ pub async fn search_book_multi_sse(
                                 word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
                             })
                             .collect();
-                        let user_ns_for_write = user_ns.clone();
-                        let book_url_for_write = synthetic_book_url.clone();
-                        let repo = state_clone.book_source_candidate_repo.clone();
+                        // Group by real book_url so getAvailableBookSource can find them
                         let batch_clone = batch_for_db.clone();
-                        db_write_handles.push(tokio::spawn(async move {
-                            if !batch_clone.is_empty() {
-                                tracing::debug!("search multi upsert batch: {} records for {}", batch_clone.len(), book_url_for_write);
-                                if let Err(e) = repo
-                                    .upsert_candidates(&user_ns_for_write, &book_url_for_write, &batch_clone)
-                                    .await
-                                {
-                                    tracing::error!("search multi upsert batch failed: {:?}", e);
-                                }
-                            }
-                        }));
-                        all_candidates.extend(batch_for_db);
+                        for c in batch_clone {
+                            candidates_by_url
+                                .entry(c.book_url.clone())
+                                .or_default()
+                                .push(c);
+                        }
 
                         let batch = take_search_book_multi_sse_batch(&key, list, &mut result_map);
                         if !batch.is_empty() {
@@ -2504,25 +2496,26 @@ pub async fn search_book_multi_sse(
             }
         }
 
-        // Wait for all batch writes, then final flush
+        // Wait for all batch writes, then flush each real book's candidates to DB
         if !db_write_handles.is_empty() {
             futures::future::join_all(db_write_handles).await;
         }
-        if !all_candidates.is_empty() {
-            let total_count = all_candidates.len();
+        if !candidates_by_url.is_empty() {
             let user_ns_for_write = user_ns.clone();
-            let book_url_for_write = synthetic_book_url.clone();
             let repo = state_clone.book_source_candidate_repo.clone();
+            let total_count: usize = candidates_by_url.values().map(|v| v.len()).sum();
             tokio::spawn(async move {
-                tracing::info!("search multi upsert final flush: user_ns={}, book_url={}, count={}", user_ns_for_write, book_url_for_write, total_count);
-                if let Err(e) = repo
-                    .upsert_candidates(&user_ns_for_write, &book_url_for_write, &all_candidates)
-                    .await
-                {
-                    tracing::error!("search multi upsert final flush failed: {:?}", e);
-                } else {
-                    tracing::info!("search multi upsert final flush success: {} records", total_count);
+                tracing::info!("search multi upsert final flush: user_ns={}, books={}, total_count={}",
+                    user_ns_for_write, candidates_by_url.len(), total_count);
+                for (book_url, candidates) in candidates_by_url {
+                    if let Err(e) = repo
+                        .upsert_candidates(&user_ns_for_write, &book_url, &candidates)
+                        .await
+                    {
+                        tracing::error!("search multi upsert failed for book_url={}: {:?}", book_url, e);
+                    }
                 }
+                tracing::info!("search multi upsert final flush done");
             })
             .await
             .ok();
