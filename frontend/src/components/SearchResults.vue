@@ -86,7 +86,7 @@ import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
 import { useAppStore } from '../stores/app'
 import { useSourceStore } from '../stores/source'
-import { searchBookMultiSSE } from '../api/search'
+import { searchBookMultiSSE, syncBookSourceCandidates } from '../api/search'
 import { saveBook } from '../api/bookshelf'
 import BookGrid from './BookGrid.vue'
 import BookDetailModal from './BookDetailModal.vue'
@@ -229,6 +229,15 @@ function doSearch(key: string) {
 
   eventSource.addEventListener('end', () => {
     shelfStore.isSearching = false
+    // Persist search results so the source panel can read candidates by (name, author)
+    if (shelfStore.searchResults.length > 0) {
+      syncBookSourceCandidates({
+        url: shelfStore.searchResults[0].bookUrl,
+        name: key,
+        author: '',
+        candidates: shelfStore.searchResults,
+      }).catch(() => { /* non-critical */ })
+    }
     shelfStore.cacheSearchResults({
       ...searchParams,
       results: shelfStore.searchResults,
