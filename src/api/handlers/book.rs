@@ -186,6 +186,10 @@ pub struct CacheBookRequest {
 #[derive(Debug, Deserialize)]
 pub struct SearchBookMultiSseRequest {
     key: Option<String>,
+    #[serde(rename = "name")]
+    name: Option<String>,
+    #[serde(rename = "author")]
+    author: Option<String>,
     #[serde(rename = "bookSourceUrl")]
     book_source_url: Option<String>,
     #[serde(rename = "bookSourceGroup")]
@@ -2321,6 +2325,8 @@ pub async fn search_book_multi_sse(
         .await
         .map_err(|_| AppError::BadRequest("NEED_LOGIN".to_string()))?;
     let key = q.key.unwrap_or_default();
+    let name_for_write = q.name.clone().unwrap_or_else(|| key.clone());
+    let author_for_write = q.author.clone().unwrap_or_default();
     let last_index = q.last_index.unwrap_or(-1);
     let search_size = q.search_size.unwrap_or(50).max(1) as usize;
     let concurrent = q.concurrent_count.unwrap_or(DEFAULT_SEARCH_CONCURRENT_COUNT).max(1) as usize;
@@ -2399,10 +2405,8 @@ pub async fn search_book_multi_sse(
             }
         };
 
-        // Group candidates by their real book_url so getAvailableBookSource can find them later
-        // (it reads by the book's actual URL, not a synthetic key)
-        let mut candidates_by_url: std::collections::HashMap<String, Vec<db::repo::BookSourceCandidate>> =
-            std::collections::HashMap::new();
+        // Collect ALL candidates (no per-source-key deduplication) keyed by the searched book's name+author
+        let mut all_candidates: Vec<db::repo::BookSourceCandidate> = Vec::new();
         let mut idx = last_index + 1;
         let mut last_idx = last_index;
         let mut result_map = std::collections::HashSet::<String>::new();
@@ -2462,14 +2466,8 @@ pub async fn search_book_multi_sse(
                                 word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
                             })
                             .collect();
-                        // Group by real book_url so getAvailableBookSource can find them
-                        let batch_clone = batch_for_db.clone();
-                        for c in batch_clone {
-                            candidates_by_url
-                                .entry(c.book_url.clone())
-                                .or_default()
-                                .push(c);
-                        }
+                        // Collect all candidates for final DB write
+                        all_candidates.extend(batch_for_db);
 
                         let batch = take_search_book_multi_sse_batch(&key, list, &mut result_map);
                         if !batch.is_empty() {
@@ -2495,25 +2493,26 @@ pub async fn search_book_multi_sse(
             }
         }
 
-        if !candidates_by_url.is_empty() {
-            let user_ns_for_write = user_ns.clone();
-            let repo = state_clone.book_source_candidate_repo.clone();
-            let total_count: usize = candidates_by_url.values().map(|v| v.len()).sum();
-            tokio::spawn(async move {
-                tracing::info!("search multi upsert final flush: user_ns={}, books={}, total_count={}",
-                    user_ns_for_write, candidates_by_url.len(), total_count);
-                for (book_url, candidates) in candidates_by_url {
-                    if let Err(e) = repo
-                        .upsert_candidates(&user_ns_for_write, &book_url, &candidates)
-                        .await
-                    {
-                        tracing::error!("search multi upsert failed for book_url={}: {:?}", book_url, e);
-                    }
-                }
-                tracing::info!("search multi upsert final flush done");
-            })
-            .await
-            .ok();
+        // Write ALL candidates to DB keyed by the searched book's (name, author)
+        let name_cloned = name_for_write.clone();
+        let author_cloned = author_for_write.clone();
+        let user_ns_for_write = user_ns.clone();
+        let repo = state_clone.book_source_candidate_repo.clone();
+        let total_count = all_candidates.len();
+        tokio::spawn(async move {
+            tracing::info!("search multi upsert final flush: user_ns={}, name={}, author={}, total={}",
+                user_ns_for_write, name_cloned, author_cloned, total_count);
+            if let Err(e) = repo
+                .upsert_candidates(&user_ns_for_write, &name_cloned, &author_cloned, &all_candidates)
+                .await
+            {
+                tracing::error!("search multi upsert failed: {:?}", e);
+            } else {
+                tracing::info!("search multi upsert final flush done: {} records", total_count);
+            }
+        })
+        .await
+        .ok();
         }
 
         let _ = tx
@@ -3122,16 +3121,16 @@ pub async fn get_available_book_source_sse(
     let (tx, rx) = mpsc::channel::<Event>(16);
 
     if !refresh && last_index_start < 0 {
-        if let Some(ref url) = book_url {
-            let candidates_to_use = if let Ok(candidates) = state
-                .book_source_candidate_repo
-                .get_candidates(&user_ns, url)
-                .await
-            {
-                candidates
-            } else {
-                Vec::new()
-            };
+        // Try to read cached candidates from DB keyed by (name, author)
+        let candidates_to_use = if let Ok(candidates) = state
+            .book_source_candidate_repo
+            .get_candidates(&user_ns, &book.name, &book.author)
+            .await
+        {
+            candidates
+        } else {
+            Vec::new()
+        };
             if !candidates_to_use.is_empty() {
                 let current_origin = book.origin.clone();
                 let cached: Vec<SearchBook> = candidates_to_use

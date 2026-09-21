@@ -17,6 +17,8 @@ export function searchBookMulti(params: {
  */
 export function searchBookMultiSSE(params: {
   key: string
+  name?: string
+  author?: string
   bookSourceGroup?: string
   bookSourceUrl?: string
   concurrentCount?: number
@@ -24,6 +26,8 @@ export function searchBookMultiSSE(params: {
 }) {
   const query = new URLSearchParams()
   query.set('key', params.key)
+  if (params.name) query.set('name', params.name)
+  if (params.author) query.set('author', params.author)
   if (params.bookSourceGroup) query.set('bookSourceGroup', params.bookSourceGroup)
   if (params.bookSourceUrl) query.set('bookSourceUrl', params.bookSourceUrl)
   if (params.concurrentCount) query.set('concurrentCount', String(params.concurrentCount))

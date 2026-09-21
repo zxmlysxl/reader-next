@@ -206,8 +206,11 @@ function doSearch(key: string) {
   shelfStore.searchResults = []
   shelfStore.isSearching = true
 
+  // name+author are passed so the backend can store candidates by (name,author) key
   eventSource = searchBookMultiSSE({
     key,
+    name: key,
+    author: '',
     concurrentCount: 24,
     bookSourceGroup: searchScope.value === 'group' ? selectedGroup.value : undefined,
     bookSourceUrl: searchScope.value === 'source' ? selectedSourceUrl.value : undefined,
