@@ -233,8 +233,8 @@ function doSearch(key: string) {
     if (shelfStore.searchResults.length > 0) {
       syncBookSourceCandidates({
         url: shelfStore.searchResults[0].bookUrl,
-        name: key,
-        author: '',
+        name: shelfStore.searchResults[0].name,
+        author: shelfStore.searchResults[0].author,
         candidates: shelfStore.searchResults,
       }).catch(() => { /* non-critical */ })
     }
