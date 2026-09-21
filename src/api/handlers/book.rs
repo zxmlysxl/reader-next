@@ -2513,7 +2513,6 @@ pub async fn search_book_multi_sse(
         })
         .await
         .ok();
-        }
 
         let _ = tx
             .send(Event::default().event("end").data(json_end(last_idx)))
