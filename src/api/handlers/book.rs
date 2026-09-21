@@ -2660,12 +2660,13 @@ pub async fn search_book_source_sse(
                     // Persist to DB immediately after each batch so partial results survive page close
                     let batch_for_db = all_candidates.clone();
                     let user_ns_for_write = user_ns.clone();
-                    let book_url_for_write = book.book_url.clone();
+                    let name_for_batch = book.name.clone();
+                    let author_for_batch = book.author.clone();
                     let repo = state_clone.book_source_candidate_repo.clone();
                     db_write_handles.push(tokio::spawn(async move {
                         if !batch_for_db.is_empty() {
-                            tracing::debug!("upsert batch: {} records for {}", batch_for_db.len(), book_url_for_write);
-                            if let Err(e) = repo.upsert_candidates(&user_ns_for_write, &book_url_for_write, &batch_for_db).await {
+                            tracing::debug!("upsert batch: {} records for name={}, author={}", batch_for_db.len(), name_for_batch, author_for_batch);
+                            if let Err(e) = repo.upsert_candidates(&user_ns_for_write, &name_for_batch, &author_for_batch, &batch_for_db).await {
                                 tracing::error!("upsert_candidates batch failed: {:?}", e);
                             }
                         }
@@ -2696,11 +2697,12 @@ pub async fn search_book_source_sse(
         if !all_candidates.is_empty() || refresh {
             let total = all_candidates.len();
             let user_ns_for_write = user_ns.clone();
-            let book_url_for_write = book.book_url.clone();
+            let name_for_write = book.name.clone();
+            let author_for_write = book.author.clone();
             let repo = state_clone.book_source_candidate_repo.clone();
             tokio::spawn(async move {
-                tracing::info!("upsert_candidates final flush: user_ns={}, book_url={}, count={}", user_ns_for_write, book_url_for_write, total);
-                if let Err(e) = repo.upsert_candidates(&user_ns_for_write, &book_url_for_write, &all_candidates).await {
+                tracing::info!("upsert_candidates final flush: user_ns={}, name={}, author={}, count={}", user_ns_for_write, name_for_write, author_for_write, total);
+                if let Err(e) = repo.upsert_candidates(&user_ns_for_write, &name_for_write, &author_for_write, &all_candidates).await {
                     tracing::error!("upsert_candidates final flush failed: {:?}", e);
                 } else {
                     tracing::info!("upsert_candidates final flush success: {} records", total);
@@ -2768,11 +2770,10 @@ pub async fn get_available_book_source(
     let book = book.or_else(|| fallback_available_book(&req));
 
     let book = book.ok_or_else(|| AppError::BadRequest("书籍信息错误".to_string()))?;
-    // Always try DB first — candidates are written by SSE handler after each batch completes
-    if let Some(ref url) = book_url {
-        match state.book_source_candidate_repo.get_candidates(&user_ns, url).await {
+    // Always try DB first — candidates are written by SSE handler keyed by (name, author)
+        match state.book_source_candidate_repo.get_candidates(&user_ns, &book.name, &book.author).await {
             Ok(candidates) => {
-                tracing::info!("REST get_candidates: found {} for url={}", candidates.len(), url);
+                tracing::info!("REST get_candidates: found {} for name={}, author={}", candidates.len(), book.name, book.author);
                 let list: Vec<SearchBook> = candidates
                     .into_iter()
                     .map(|c| SearchBook {
@@ -2804,7 +2805,7 @@ pub async fn get_available_book_source(
                 tracing::error!("REST get_candidates failed: {:?}", e);
             }
         }
-    }
+    // Fall through: no cached candidates, do live source search
     let sources = state.book_source_service.list(&user_ns).await?;
     if sources.is_empty() {
         if paged_request {
@@ -2898,10 +2899,10 @@ pub async fn get_available_book_source(
                 word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
             })
             .collect();
-        tracing::info!("REST upsert_candidates: user_ns={}, book_url={}, count={}", user_ns, book.book_url, candidates.len());
+        tracing::info!("REST upsert_candidates: user_ns={}, name={}, author={}, count={}", user_ns, book.name, book.author, candidates.len());
         if let Err(e) = state
             .book_source_candidate_repo
-            .upsert_candidates(&user_ns, &book.book_url, &candidates)
+            .upsert_candidates(&user_ns, &book.name, &book.author, &candidates)
             .await
         {
             tracing::error!("REST upsert_candidates failed: {:?}", e);
@@ -2937,10 +2938,10 @@ pub async fn get_available_book_source(
                 word_count: b.word_count.as_ref().and_then(|s| s.parse().ok()),
             })
             .collect();
-        tracing::info!("REST paged upsert_candidates: user_ns={}, book_url={}, count={}", user_ns, book.book_url, candidates.len());
+        tracing::info!("REST paged upsert_candidates: user_ns={}, name={}, author={}, count={}", user_ns, book.name, book.author, candidates.len());
         if let Err(e) = state
             .book_source_candidate_repo
-            .upsert_candidates(&user_ns, &book.book_url, &candidates)
+            .upsert_candidates(&user_ns, &book.name, &book.author, &candidates)
             .await
         {
             tracing::error!("REST paged upsert_candidates failed: {:?}", e);
@@ -3000,7 +3001,7 @@ pub async fn sync_book_source_candidates(
             .collect();
         if let Err(e) = state
             .book_source_candidate_repo
-            .upsert_candidates(&user_ns, &req.url, &candidates)
+            .upsert_candidates(&user_ns, req.name.as_deref().unwrap_or(""), req.author.as_deref().unwrap_or(""), &candidates)
             .await
         {
             tracing::error!("sync upsert_candidates failed: {:?}", e);
@@ -3009,7 +3010,7 @@ pub async fn sync_book_source_candidates(
         }
     }
 
-    match state.book_source_candidate_repo.get_candidates(&user_ns, &req.url).await {
+    match state.book_source_candidate_repo.get_candidates(&user_ns, req.name.as_deref().unwrap_or(""), req.author.as_deref().unwrap_or("")).await {
         Ok(db_candidates) => {
             let list: Vec<SearchBook> = db_candidates
                 .into_iter()
