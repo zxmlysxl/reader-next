@@ -3188,8 +3188,6 @@ pub async fn get_available_book_source_sse(
                     return Ok(Sse::new(ReceiverStream::new(rx).map(Ok)));
                 }
             }
-        }
-    }
 
     let sources = state.book_source_service.list(&user_ns).await?;
     let state_clone = state.clone();
